@@ -41,7 +41,7 @@ function extractDisplayName(data: ClerkUserPayload): string {
     .trim();
   if (fullName) return fullName;
   if (data.username && data.username.trim().length > 0) return data.username.trim();
-  return "Neighbor";
+  return "";
 }
 
 const http = httpRouter();

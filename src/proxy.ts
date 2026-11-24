@@ -38,11 +38,11 @@ const clerkProxyHandler = clerkMiddleware(
         const signInUrl = new URL("/sign-in", request.url);
         const returnPath = `${request.nextUrl.pathname}${request.nextUrl.search}`;
         signInUrl.searchParams.set("redirect_url", returnPath);
-        return applySecurityHeaders(NextResponse.redirect(signInUrl), request);
+        return NextResponse.redirect(signInUrl);
       }
     }
 
-    return applySecurityHeaders(NextResponse.next(), request);
+    return NextResponse.next();
   },
   () => ({
     publishableKey: process.env.CLERK_PUBLISHABLE_KEY,

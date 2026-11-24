@@ -41,6 +41,23 @@ function isBootstrapAdminEmail(email: string): boolean {
 
 const CASCADE_BATCH_SIZE = 100;
 
+async function drainBatches<T>(
+  fetchBatch: () => Promise<T[]>,
+  processItem: (item: T) => Promise<void>,
+): Promise<number> {
+  let count = 0;
+  for (;;) {
+    const batch = await fetchBatch();
+    if (batch.length === 0) break;
+    for (const item of batch) {
+      await processItem(item);
+      count += 1;
+    }
+    if (batch.length < CASCADE_BATCH_SIZE) break;
+  }
+  return count;
+}
+
 export const syncCurrentUser = mutation({
   args: {},
   returns: currentUserDtoValidator,
@@ -51,8 +68,7 @@ export const syncCurrentUser = mutation({
     await enforceRateLimit(ctx, "syncCurrentUser", externalId);
 
     const email = (identity.email ?? "").trim().toLowerCase();
-    const displayName =
-      (identity.name ?? identity.nickname ?? identity.givenName ?? "").trim() || "Neighbor";
+    const rawDisplayName = (identity.name ?? identity.nickname ?? identity.givenName ?? "").trim();
     const now = Date.now();
 
     const existing = await ctx.db
@@ -62,14 +78,14 @@ export const syncCurrentUser = mutation({
 
     if (existing) {
       if (existing.deletedAt !== undefined) {
-        throw createAppError("FORBIDDEN", "This account has been deleted.", {
+        throw createAppError("FORBIDDEN", "This User has been deleted.", {
           targetType: "user",
           targetId: existing._id,
         });
       }
 
       const nextEmail = email || existing.email;
-      const nextDisplayName = displayName || existing.displayName;
+      const nextDisplayName = rawDisplayName || existing.displayName;
       if (nextEmail !== existing.email || nextDisplayName !== existing.displayName) {
         await ctx.db.patch(existing._id, {
           email: nextEmail,
@@ -78,15 +94,14 @@ export const syncCurrentUser = mutation({
         });
       }
 
-      return {
-        _id: existing._id,
-        displayName: nextDisplayName,
+      return toCurrentUserDto({
+        ...existing,
         email: nextEmail,
-        role: existing.role,
-        trustedLender: existing.trustedLender,
-      };
+        displayName: nextDisplayName,
+      });
     }
 
+    const displayName = rawDisplayName || "Neighbor";
     const initialRole: "user" | "admin" = isBootstrapAdminEmail(email) ? "admin" : "user";
     const userId = await ctx.db.insert("users", {
       externalId,
@@ -168,9 +183,12 @@ export const handleClerkUserUpdated = internalMutation({
       return { updated: false };
     }
 
+    const nextEmail = args.email.trim().toLowerCase() || user.email;
+    const nextDisplayName = args.displayName.trim() || user.displayName;
+
     await ctx.db.patch(user._id, {
-      email: args.email.trim().toLowerCase(),
-      displayName: args.displayName.trim() || user.displayName,
+      email: nextEmail,
+      displayName: nextDisplayName,
       updatedAt: Date.now(),
     });
 
@@ -218,17 +236,15 @@ export const handleClerkUserDeleted = internalMutation({
     });
 
     // 2. Archive active Listings and delete their image blobs
-    let archivedListings = 0;
-    for (;;) {
-      const batch = await ctx.db
-        .query("listings")
-        .withIndex("by_lender_archived", (q) =>
-          q.eq("lenderId", user._id).eq("archivedAt", undefined),
-        )
-        .take(CASCADE_BATCH_SIZE);
-      if (batch.length === 0) break;
-
-      for (const listing of batch) {
+    const archivedListings = await drainBatches(
+      () =>
+        ctx.db
+          .query("listings")
+          .withIndex("by_lender_archived", (q) =>
+            q.eq("lenderId", user._id).eq("archivedAt", undefined),
+          )
+          .take(CASCADE_BATCH_SIZE),
+      async (listing) => {
         if (listing.imageIds) {
           for (const storageId of listing.imageIds) {
             await ctx.storage.delete(storageId);
@@ -237,75 +253,61 @@ export const handleClerkUserDeleted = internalMutation({
         await ctx.db.patch(listing._id, {
           archivedAt: now,
           archivedBy: user._id,
-          archiveReason: "Account deleted",
+          archiveReason: "User deleted",
           imageIds: [],
           updatedAt: now,
         });
-        archivedListings += 1;
-      }
-      if (batch.length < CASCADE_BATCH_SIZE) break;
-    }
+      },
+    );
 
     // 3. Clean up pending image uploads and their storage blobs
-    let deletedUploads = 0;
-    for (;;) {
-      const batch = await ctx.db
-        .query("listingImageUploads")
-        .withIndex("by_uploader_status", (q) =>
-          q.eq("uploaderId", user._id).eq("status", "pending"),
-        )
-        .take(CASCADE_BATCH_SIZE);
-      if (batch.length === 0) break;
-
-      for (const upload of batch) {
+    const deletedUploads = await drainBatches(
+      () =>
+        ctx.db
+          .query("listingImageUploads")
+          .withIndex("by_uploader_status", (q) =>
+            q.eq("uploaderId", user._id).eq("status", "pending"),
+          )
+          .take(CASCADE_BATCH_SIZE),
+      async (upload) => {
         await ctx.storage.delete(upload.storageId);
         await ctx.db.delete(upload._id);
-        deletedUploads += 1;
-      }
-      if (batch.length < CASCADE_BATCH_SIZE) break;
-    }
+      },
+    );
 
     // 4. Auto-cancel pending Borrower Loans (preserving approved and historical Loans)
-    let cancelledLoans = 0;
-    for (;;) {
-      const batch = await ctx.db
-        .query("loans")
-        .withIndex("by_borrower_status", (q) =>
-          q.eq("borrowerId", user._id).eq("status", "pending"),
-        )
-        .take(CASCADE_BATCH_SIZE);
-      if (batch.length === 0) break;
-
-      for (const loan of batch) {
+    const cancelledLoans = await drainBatches(
+      () =>
+        ctx.db
+          .query("loans")
+          .withIndex("by_borrower_status", (q) =>
+            q.eq("borrowerId", user._id).eq("status", "pending"),
+          )
+          .take(CASCADE_BATCH_SIZE),
+      async (loan) => {
         await ctx.db.patch(loan._id, {
           status: "cancelled",
-          decisionReason: "Borrower account deleted",
+          decisionReason: "Borrower User deleted",
           updatedAt: now,
         });
-        cancelledLoans += 1;
-      }
-      if (batch.length < CASCADE_BATCH_SIZE) break;
-    }
+      },
+    );
 
     // 5. Auto-decline pending Lender Loans (preserving approved and historical Loans)
-    let declinedLoans = 0;
-    for (;;) {
-      const batch = await ctx.db
-        .query("loans")
-        .withIndex("by_lender_status", (q) => q.eq("lenderId", user._id).eq("status", "pending"))
-        .take(CASCADE_BATCH_SIZE);
-      if (batch.length === 0) break;
-
-      for (const loan of batch) {
+    const declinedLoans = await drainBatches(
+      () =>
+        ctx.db
+          .query("loans")
+          .withIndex("by_lender_status", (q) => q.eq("lenderId", user._id).eq("status", "pending"))
+          .take(CASCADE_BATCH_SIZE),
+      async (loan) => {
         await ctx.db.patch(loan._id, {
           status: "declined",
-          decisionReason: "Lender account deleted",
+          decisionReason: "Lender User deleted",
           updatedAt: now,
         });
-        declinedLoans += 1;
-      }
-      if (batch.length < CASCADE_BATCH_SIZE) break;
-    }
+      },
+    );
 
     // 6. Record non-PII Audit Log entry atomically
     await recordAuditLog(ctx, {

@@ -245,7 +245,7 @@ describe("Svix-verified Clerk webhook (user.updated and user.deleted cascade)", 
       // 2. Listing archived and photo deleted from storage
       const archivedListing = await ctx.db.get(seeded.targetListingId);
       expect(archivedListing?.archivedAt).toBeTypeOf("number");
-      expect(archivedListing?.archiveReason).toBe("Account deleted");
+      expect(archivedListing?.archiveReason).toBe("User deleted");
       expect(archivedListing?.imageIds).toEqual([]);
       expect(await ctx.storage.get(seeded.listingPhotoId)).toBeNull();
 
@@ -256,11 +256,11 @@ describe("Svix-verified Clerk webhook (user.updated and user.deleted cascade)", 
       // 4. Pending loans transitioned; approved & historical loans preserved
       const borrowerLoan = await ctx.db.get(seeded.pendingBorrowerLoanId);
       expect(borrowerLoan?.status).toBe("cancelled");
-      expect(borrowerLoan?.decisionReason).toBe("Borrower account deleted");
+      expect(borrowerLoan?.decisionReason).toBe("Borrower User deleted");
 
       const lenderLoan = await ctx.db.get(seeded.pendingLenderLoanId);
       expect(lenderLoan?.status).toBe("declined");
-      expect(lenderLoan?.decisionReason).toBe("Lender account deleted");
+      expect(lenderLoan?.decisionReason).toBe("Lender User deleted");
 
       const approvedLoan = await ctx.db.get(seeded.approvedLoanId);
       expect(approvedLoan?.status).toBe("approved");

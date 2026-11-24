@@ -61,6 +61,12 @@ describe("User sync, JWT-only identity, bootstrap admin, and rate limiting", () 
 
     const fetched = await asAliceRenamed.query(api.users.queries.getCurrentUser, {});
     expect(fetched).toEqual(second);
+
+    // Re-syncing with omitted name/email claims must preserve stored displayName and email
+    const asAliceMinimalClaims = t.withIdentity({ subject: "user_alice_1" });
+    const third = await asAliceMinimalClaims.mutation(api.users.mutations.syncCurrentUser, {});
+    expect(third.displayName).toBe("Alice Updated");
+    expect(third.email).toBe("alice.new@example.com");
   });
 
   it("rejects spoofed client-supplied identity or role arguments on syncCurrentUser", async () => {
