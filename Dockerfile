@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 ARG NODE_IMAGE=node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
 
 FROM ${NODE_IMAGE} AS base
@@ -29,7 +27,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-RUN addgroup -g 10001 -S nodejs \
+RUN apk upgrade --no-cache \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn* /usr/local/bin/yarn /usr/local/bin/yarnpkg \
+  && addgroup -g 10001 -S nodejs \
   && adduser -S nextjs -u 10001 -G nodejs
 
 COPY --from=builder --chown=10001:10001 /app/public ./public
