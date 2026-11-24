@@ -11,4 +11,6 @@ regexes = [
   '''sk_test_super_secret_value_do_not_leak''',
   '''sk_test_replace_with_your_clerk_secret_key''',
   '''pk_test_replace_with_your_clerk_publishable_key''',
+  '''whsec_Y2lfc3ludGhldGljX25vbl9zZWNyZXRfcGxhY2Vob2xkZXI=''',
+  '''sk_live_abc123456789''',
 ]

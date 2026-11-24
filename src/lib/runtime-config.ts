@@ -66,6 +66,26 @@ export type RuntimeConfigValidationResult =
       errors: string[];
     };
 
+export function isSyntheticClerkKey(publishableKey: string | undefined): boolean {
+  if (!publishableKey) return true;
+  const trimmed = publishableKey.trim();
+  const prefix = trimmed.startsWith("pk_test_")
+    ? "pk_test_"
+    : trimmed.startsWith("pk_live_")
+      ? "pk_live_"
+      : null;
+  if (!prefix) return true;
+  try {
+    const raw = trimmed.slice(prefix.length).replace(/-/g, "+").replace(/_/g, "/");
+    const decoded =
+      typeof atob === "function" ? atob(raw) : Buffer.from(raw, "base64").toString("utf8");
+    const host = decoded.replace(/\$+$/, "").trim().toLowerCase();
+    return host.endsWith(".local") || host.includes("replace_with_your");
+  } catch {
+    return true;
+  }
+}
+
 export function validateRuntimeConfig(
   env: Record<string, string | undefined>,
 ): RuntimeConfigValidationResult {

@@ -24,13 +24,17 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm check:workflows && pnpm test"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.10.7",
+    "@convex-dev/rate-limiter": "^0.4.3",
     "@radix-ui/react-slot": "^1.5.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "convex": "^1.51.0",
     "lucide-react": "^1.78.0",
     "next": "^16.4.6",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "svix": "^2.11.0",
     "tailwind-merge": "^3.7.1",
     "zod": "^4.6.7"
   },
@@ -42,6 +46,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitest/coverage-v8": "^5.1.1",
+    "convex-test": "^0.0.73",
     "eslint": "^10.15.0",
     "eslint-config-next": "^16.4.6",
     "postcss": "^8.5.33",

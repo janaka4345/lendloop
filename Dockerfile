@@ -8,14 +8,15 @@ RUN corepack enable
 
 FROM base AS deps
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json pnpm-lock.yaml next.config.ts postcss.config.mjs tsconfig.json components.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml next.config.ts postcss.config.mjs tsconfig.json components.json ./
 COPY src ./src
+COPY convex ./convex
 COPY public ./public
 RUN pnpm build
 
