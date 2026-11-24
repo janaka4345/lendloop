@@ -1,5 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
+import { isSyntheticClerkKey } from "@/lib/runtime-config";
 import { buildSecurityHeaders } from "@/lib/security-headers";
 
 const isPublicRoute = createRouteMatcher([
@@ -52,6 +53,10 @@ const clerkProxyHandler = clerkMiddleware(
 );
 
 export async function proxy(request: NextRequest, event: NextFetchEvent): Promise<Response> {
+  if (isPublicRoute(request) && isSyntheticClerkKey(process.env.CLERK_PUBLISHABLE_KEY)) {
+    return applySecurityHeaders(NextResponse.next(), request);
+  }
+
   const result = await clerkProxyHandler(request, event);
   if (result) {
     return applySecurityHeaders(result, request);

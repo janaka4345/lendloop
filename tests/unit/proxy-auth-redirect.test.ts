@@ -37,12 +37,15 @@ describe("Next.js Clerk auth proxy and protected deep-link redirects", () => {
     expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
   });
 
-  it("allows unauthenticated visitors on public routes with security headers", async () => {
+  it("allows unauthenticated browser visitors on public routes with security headers and no handshake redirect", async () => {
     const { proxy } = await import("@/proxy");
     for (const path of ["/", "/healthz", "/readyz", "/api/config", "/sign-in"]) {
-      const request = new NextRequest(`http://localhost:3000${path}`);
+      const request = new NextRequest(`http://localhost:3000${path}`, {
+        headers: { accept: "text/html,application/xhtml+xml" },
+      });
       const response = await proxy(request, createFakeEvent());
-      expect(response.status).not.toBe(307);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("location")).toBeNull();
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     }
   });
