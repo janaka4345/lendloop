@@ -1,6 +1,6 @@
 import { Wrench } from "lucide-react";
+import { SignInCtaButton } from "@/components/auth/sign-in-cta-button";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function HomePage() {
@@ -17,9 +17,7 @@ export default function HomePage() {
           returns without exposing personal contact details.
         </p>
         <div className="flex flex-wrap gap-3 pt-2">
-          <Button type="button" size="lg">
-            Sign in to lend or borrow
-          </Button>
+          <SignInCtaButton />
         </div>
       </header>
 
