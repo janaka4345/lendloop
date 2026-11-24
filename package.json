@@ -20,7 +20,8 @@
     "test:convex": "vitest run --project convex",
     "test:coverage": "vitest run --project unit --coverage",
     "test:e2e": "playwright test",
-    "check:workflows": "node scripts/check-workflow-hygiene.mjs"
+    "check:workflows": "node scripts/check-workflow-hygiene.mjs",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm check:workflows && pnpm test"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.5.0",

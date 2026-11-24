@@ -14,6 +14,6 @@ Single-context layout (`GLOSSARY.md` and `docs/adr/` at the repo root). See `doc
 
 ### Branching & Pull requests
 
-Never commit or push directly to `main` (protected by branch ruleset). Before implementing any ticket or change, create a branch off `main` (e.g. `feat/<ticket-slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>`), commit there, push the branch, and open a pull request targeting `main`.
+Create a branch off `main` (`feat/<ticket-slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>`) before implementing any ticket or change, commit there, push the branch, and open a pull request targeting `main` (`main` is protected by branch ruleset).
 
 Every PR body must follow the `/pr` skill (`.agents/skills/pr/SKILL.md`).

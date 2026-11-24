@@ -63,4 +63,18 @@ describe("ESLint modular-monolith import boundaries", () => {
     );
     expect(restrictionErrors).toHaveLength(0);
   });
+
+  it("forbids NEXT_PUBLIC_* env var access in src/**", async () => {
+    const [result] = await eslint.lintText(
+      [
+        `export const a = process.env.NEXT_PUBLIC_CONVEX_URL;`,
+        `export const b = process.env["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"];`,
+        `export const c = process.env.CONVEX_URL;`,
+      ].join("\n"),
+      { filePath: "src/lib/example.ts" },
+    );
+
+    const syntaxErrors = result.messages.filter((msg) => msg.ruleId === "no-restricted-syntax");
+    expect(syntaxErrors).toHaveLength(2);
+  });
 });
