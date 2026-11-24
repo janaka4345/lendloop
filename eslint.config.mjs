@@ -72,6 +72,26 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "MemberExpression[object.type='MemberExpression'][object.object.name='process'][object.property.name='env'][property.name=/^NEXT_PUBLIC_/]",
+          message:
+            "Build-time NEXT_PUBLIC_* env vars are forbidden. Read server runtime config or fetch GET /api/config instead.",
+        },
+        {
+          selector:
+            "MemberExpression[computed=true][object.type='MemberExpression'][object.object.name='process'][object.property.name='env'][property.type='Literal'][property.value=/^NEXT_PUBLIC_/]",
+          message:
+            "Build-time NEXT_PUBLIC_* env vars are forbidden. Read server runtime config or fetch GET /api/config instead.",
+        },
+      ],
+    },
+  },
   ...createBackendSliceBoundaryConfigs(),
 ]);
 
