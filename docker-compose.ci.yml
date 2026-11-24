@@ -1,0 +1,10 @@
+# Secret-free CI override supplying synthetic runtime configuration and using the scanned CI image.
+services:
+  web:
+    image: lendloop-web:ci
+    environment:
+      APP_URL: http://localhost:3000
+      CONVEX_URL: http://host.docker.internal:3210
+      CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuY2kubGVuZGxvb3AubG9jYWwk
+      CLERK_SECRET_KEY: sk_test_ci_synthetic_non_secret_placeholder
+      APP_ENV: ci

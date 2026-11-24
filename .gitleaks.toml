@@ -1,0 +1,13 @@
+title = "LendLoop gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Exact synthetic non-secret placeholders used in CI Compose override, examples, and unit tests"
+regexes = [
+  '''sk_test_ci_synthetic_non_secret_placeholder''',
+  '''sk_test_super_secret_value_do_not_leak''',
+  '''sk_test_replace_with_your_clerk_secret_key''',
+  '''pk_test_replace_with_your_clerk_publishable_key''',
+]

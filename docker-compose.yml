@@ -1,0 +1,56 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      CONVEX_URL: ${CONVEX_URL:-http://host.docker.internal:3210}
+      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      CLERK_FRONTEND_API_URL: ${CLERK_FRONTEND_API_URL:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      APP_ENV: ${APP_ENV:-local}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/readyz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    depends_on:
+      mailpit:
+        condition: service_started
+
+  mailpit:
+    image: axllent/mailpit:v1.24@sha256:3ad9483ac2dea937ae402b95435ab12c3355d2373a1002a49491db0be536d8fa
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

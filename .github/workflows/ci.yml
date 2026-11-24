@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-checks:
+    name: Static Checks & Security Audits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: ESLint (including modular-monolith seams)
+        run: pnpm lint
+
+      - name: Prettier formatting check
+        run: pnpm format:check
+
+      - name: TypeScript typecheck
+        run: pnpm typecheck
+
+      - name: Workflow JSON hygiene check
+        run: pnpm check:workflows
+
+      - name: Production dependency audit
+        run: pnpm audit --prod --audit-level=high
+
+      - name: Secret scanning (Gitleaks)
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    name: Unit & Backend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Vitest unit and convex suites
+        run: pnpm test
+
+  container-e2e:
+    name: Container Build, Grype CVE Scan & Playwright Smoke E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build standalone container image
+        run: docker build --tag lendloop-web:ci .
+
+      - name: Scan container image with Grype (critical, only-fixed)
+        uses: anchore/scan-action@1638637db639e0ade3258b51db49a9a137574c3e # v6
+        with:
+          image: "lendloop-web:ci"
+          fail-build: true
+          severity-cutoff: "critical"
+          only-fixed: true
+
+      - name: Install dependencies for Playwright
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start Compose stack (CI secret-free override using scanned image)
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --no-build --wait
+
+      - name: Run Playwright container smoke E2E
+        run: pnpm test:e2e
+        env:
+          PLAYWRIGHT_BASE_URL: "http://localhost:3000"
+
+      - name: Print container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
+
+      - name: Tear down Compose stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v
