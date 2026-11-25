@@ -5,7 +5,7 @@ import { AlertTriangle, Clock, History, Inbox } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
-import { useHasConvexProvider } from "@/components/providers/app-providers";
+import { useHasConvexProvider, useSyncedCurrentUser } from "@/components/providers/app-providers";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,13 +13,14 @@ import { LoanCard, type LoanCardItem } from "./loan-card";
 
 function LiveLoansBoard({ mode }: { mode: "borrower" | "lender" }) {
   const [tab, setTab] = useState<"active" | "history">("active");
+  const currentUser = useSyncedCurrentUser();
   const myRequests = useQuery(
     api.lending.queries.listMyRequests,
-    mode === "borrower" ? {} : "skip",
+    currentUser && mode === "borrower" ? {} : "skip",
   );
   const incomingRequests = useQuery(
     api.lending.queries.listIncomingRequests,
-    mode === "lender" ? {} : "skip",
+    currentUser && mode === "lender" ? {} : "skip",
   );
 
   const data = mode === "borrower" ? myRequests : incomingRequests;

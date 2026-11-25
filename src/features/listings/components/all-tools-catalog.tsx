@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import { useHasConvexProvider } from "@/components/providers/app-providers";
+import { useHasConvexProvider, useSyncedCurrentUser } from "@/components/providers/app-providers";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,13 +55,19 @@ function LiveAllToolsCatalog() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  const page = useQuery(api.listings.queries.listCatalogListings, {
-    ...(debouncedSearch ? { search: debouncedSearch } : {}),
-    ...(selectedCategory !== "all" ? { category: selectedCategory } : {}),
-    ...(availableOnly ? { availableOnly: true } : {}),
-    cursor,
-    limit: DOMAIN_LIMITS.MAX_PAGE_SIZE,
-  });
+  const currentUser = useSyncedCurrentUser();
+  const page = useQuery(
+    api.listings.queries.listCatalogListings,
+    currentUser
+      ? {
+          ...(debouncedSearch ? { search: debouncedSearch } : {}),
+          ...(selectedCategory !== "all" ? { category: selectedCategory } : {}),
+          ...(availableOnly ? { availableOnly: true } : {}),
+          cursor,
+          limit: DOMAIN_LIMITS.MAX_PAGE_SIZE,
+        }
+      : "skip",
+  );
 
   const items = useMemo(() => {
     if (cursor === null) {

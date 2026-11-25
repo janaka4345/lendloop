@@ -19,7 +19,7 @@ import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import { useHasConvexProvider } from "@/components/providers/app-providers";
+import { useHasConvexProvider, useSyncedCurrentUser } from "@/components/providers/app-providers";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -191,7 +191,11 @@ function BorrowRequestCard({
 }
 
 function LiveListingDetailContent({ listingId }: { listingId: Id<"listings"> }) {
-  const listing = useQuery(api.listings.queries.getListingDetail, { listingId });
+  const currentUser = useSyncedCurrentUser();
+  const listing = useQuery(
+    api.listings.queries.getListingDetail,
+    currentUser ? { listingId } : "skip",
+  );
 
   if (listing === undefined) {
     return (
