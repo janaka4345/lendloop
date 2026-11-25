@@ -1,12 +1,14 @@
 "use client";
 
 import { ClerkProvider, useAuth } from "@clerk/nextjs";
+import * as Sentry from "@sentry/nextjs";
 import { ConvexReactClient, useConvexAuth, useMutation } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Toaster } from "sonner";
 import { api } from "../../../convex/_generated/api";
 import { isSyntheticClerkKey, type PublicRuntimeConfig } from "@/lib/runtime-config";
+import { buildSentryInitOptions } from "@/lib/sentry";
 
 const ConvexAvailableContext = createContext<boolean>(false);
 
@@ -44,6 +46,18 @@ export function AppProviders({
   config: PublicRuntimeConfig | null;
   children: ReactNode;
 }) {
+  useEffect(() => {
+    if (Sentry.isInitialized()) return;
+    const options = buildSentryInitOptions({
+      dsn: config?.sentryDsn,
+      environment: config?.environment,
+      nodeEnv: process.env.NODE_ENV,
+    });
+    if (options) {
+      Sentry.init(options);
+    }
+  }, [config?.sentryDsn, config?.environment]);
+
   const convexUrl = config?.convexUrl;
   const convexClient = useMemo(() => {
     if (!convexUrl) return null;
