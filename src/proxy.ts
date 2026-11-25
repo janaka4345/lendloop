@@ -33,14 +33,21 @@ function applySecurityHeaders(response: Response, request: NextRequest): Respons
 
 const clerkProxyHandler = clerkMiddleware(
   async (auth, request) => {
-    if (!isPublicRoute(request)) {
-      const { userId } = await auth();
-      if (!userId) {
-        const signInUrl = new URL("/sign-in", request.url);
-        const returnPath = `${request.nextUrl.pathname}${request.nextUrl.search}`;
-        signInUrl.searchParams.set("redirect_url", returnPath);
-        return NextResponse.redirect(signInUrl);
+    const { userId } = await auth();
+
+    // Signed-in Users visiting `/` redirect straight to All Tools (`/listings`)
+    if (request.nextUrl.pathname === "/" && userId) {
+      return NextResponse.redirect(new URL("/listings", request.url));
+    }
+
+    if (!isPublicRoute(request) && !userId) {
+      if (request.nextUrl.pathname.startsWith("/api/")) {
+        return NextResponse.json({ error: "Authentication is required." }, { status: 401 });
       }
+      const signInUrl = new URL("/sign-in", request.url);
+      const returnPath = `${request.nextUrl.pathname}${request.nextUrl.search}`;
+      signInUrl.searchParams.set("redirect_url", returnPath);
+      return NextResponse.redirect(signInUrl);
     }
 
     return NextResponse.next();

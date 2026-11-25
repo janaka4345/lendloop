@@ -1,0 +1,449 @@
+import { v } from "convex/values";
+import type { Id } from "../_generated/dataModel";
+import { mutation, type MutationCtx } from "../_generated/server";
+import { DOMAIN_LIMITS } from "../../src/domain/types";
+import { recordAuditLog } from "../audit/seam";
+import { requireCurrentUser, requireListingLender } from "../lib/authz";
+import { createAppError } from "../lib/errors";
+import { enforceRateLimit } from "../lib/rateLimit";
+import { listingCategoryValidator, listingConditionValidator } from "../schema";
+import {
+  ALLOWED_STORED_CONTENT_TYPE,
+  MAX_PENDING_UPLOADS_PER_USER,
+  MAX_SANITIZED_IMAGE_DIMENSION,
+  MAX_UPLOAD_BYTES,
+  deleteListingImageBlobs,
+  syncListingImages,
+} from "./images";
+
+const ARCHIVE_LOAN_BATCH_SIZE = 100;
+
+function validateListingTextFields(name: string, description: string) {
+  const trimmedName = name.trim();
+  const trimmedDescription = description.trim();
+
+  if (trimmedName.length === 0) {
+    throw createAppError("VALIDATION_ERROR", "Listing name is required.");
+  }
+  if (trimmedName.length > DOMAIN_LIMITS.MAX_LISTING_NAME_LENGTH) {
+    throw createAppError(
+      "VALIDATION_ERROR",
+      `Listing name cannot exceed ${DOMAIN_LIMITS.MAX_LISTING_NAME_LENGTH} characters.`,
+    );
+  }
+  if (trimmedDescription.length === 0) {
+    throw createAppError("VALIDATION_ERROR", "Listing description is required.");
+  }
+  if (trimmedDescription.length > DOMAIN_LIMITS.MAX_LISTING_DESCRIPTION_LENGTH) {
+    throw createAppError(
+      "VALIDATION_ERROR",
+      `Listing description cannot exceed ${DOMAIN_LIMITS.MAX_LISTING_DESCRIPTION_LENGTH} characters.`,
+    );
+  }
+
+  return { trimmedName, trimmedDescription };
+}
+
+async function assertPendingUploadCapacity(
+  ctx: MutationCtx,
+  uploaderId: Id<"users">,
+  storageIdToDeleteOnExceed?: Id<"_storage">,
+): Promise<void> {
+  const pendingUploads = await ctx.db
+    .query("listingImageUploads")
+    .withIndex("by_uploader_status", (q) => q.eq("uploaderId", uploaderId).eq("status", "pending"))
+    .take(MAX_PENDING_UPLOADS_PER_USER + 1);
+
+  if (pendingUploads.length >= MAX_PENDING_UPLOADS_PER_USER) {
+    if (storageIdToDeleteOnExceed) {
+      await ctx.storage.delete(storageIdToDeleteOnExceed);
+    }
+    throw createAppError(
+      "VALIDATION_ERROR",
+      `You can have at most ${MAX_PENDING_UPLOADS_PER_USER} pending photo uploads at a time. Save or remove pending photos first.`,
+    );
+  }
+}
+
+/**
+ * Generates a short-lived Convex storage upload URL for the authenticated User.
+ * Enforces 10 uploads/minute rate limiting and the 10-pending-upload cap per User.
+ */
+export const generateListingImageUploadUrl = mutation({
+  args: {},
+  returns: v.object({
+    uploadUrl: v.string(),
+  }),
+  handler: async (ctx) => {
+    const user = await requireCurrentUser(ctx);
+    await enforceRateLimit(ctx, "listingImageUpload", user._id);
+    await assertPendingUploadCapacity(ctx, user._id);
+
+    const uploadUrl = await ctx.storage.generateUploadUrl();
+    return { uploadUrl };
+  },
+});
+
+/**
+ * Registers a sanitized WebP upload in `listingImageUploads` owned by the authenticated User.
+ * Verifies authoritative `_storage` system metadata (contentType and size) to prevent spoofing.
+ */
+export const registerListingImageUpload = mutation({
+  args: {
+    storageId: v.id("_storage"),
+    contentType: v.string(),
+    sizeBytes: v.number(),
+    width: v.number(),
+    height: v.number(),
+  },
+  returns: v.object({
+    storageId: v.id("_storage"),
+    url: v.string(),
+    width: v.number(),
+    height: v.number(),
+    sizeBytes: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+
+    if (args.contentType !== ALLOWED_STORED_CONTENT_TYPE) {
+      throw createAppError("VALIDATION_ERROR", "Only sanitized WebP images can be registered.");
+    }
+    if (
+      args.width <= 0 ||
+      args.width > MAX_SANITIZED_IMAGE_DIMENSION ||
+      args.height <= 0 ||
+      args.height > MAX_SANITIZED_IMAGE_DIMENSION
+    ) {
+      throw createAppError(
+        "VALIDATION_ERROR",
+        `Sanitized photo dimensions must be within ${MAX_SANITIZED_IMAGE_DIMENSION}x${MAX_SANITIZED_IMAGE_DIMENSION}.`,
+      );
+    }
+
+    const storageMeta = await ctx.db.system.get(args.storageId);
+    if (!storageMeta) {
+      throw createAppError("NOT_FOUND", "Uploaded photo blob was not found in storage.");
+    }
+    if (storageMeta.contentType !== ALLOWED_STORED_CONTENT_TYPE) {
+      await ctx.storage.delete(args.storageId);
+      throw createAppError(
+        "VALIDATION_ERROR",
+        "Stored photo must be a sanitized WebP image uploaded via the image endpoint.",
+      );
+    }
+    if (storageMeta.size <= 0 || storageMeta.size > MAX_UPLOAD_BYTES) {
+      await ctx.storage.delete(args.storageId);
+      throw createAppError("VALIDATION_ERROR", "Uploaded photo exceeds the 5 MB size limit.");
+    }
+
+    const existing = await ctx.db
+      .query("listingImageUploads")
+      .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId))
+      .unique();
+
+    if (existing) {
+      throw createAppError("CONFLICT", "This uploaded photo has already been registered.");
+    }
+
+    await assertPendingUploadCapacity(ctx, user._id, args.storageId);
+
+    const url = await ctx.storage.getUrl(args.storageId);
+    if (!url) {
+      throw createAppError("NOT_FOUND", "Uploaded photo blob was not found in storage.");
+    }
+
+    await ctx.db.insert("listingImageUploads", {
+      storageId: args.storageId,
+      uploaderId: user._id,
+      status: "pending",
+      contentType: storageMeta.contentType,
+      sizeBytes: storageMeta.size,
+      width: args.width,
+      height: args.height,
+      createdAt: Date.now(),
+    });
+
+    return {
+      storageId: args.storageId,
+      url,
+      width: args.width,
+      height: args.height,
+      sizeBytes: storageMeta.size,
+    };
+  },
+});
+
+/**
+ * Immediately discards a cancelled or unsaved pending photo upload owned by the caller.
+ */
+export const discardPendingListingImageUpload = mutation({
+  args: {
+    storageId: v.id("_storage"),
+  },
+  returns: v.object({
+    discarded: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+
+    const upload = await ctx.db
+      .query("listingImageUploads")
+      .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId))
+      .unique();
+
+    if (!upload) {
+      return { discarded: false };
+    }
+
+    if (upload.uploaderId !== user._id) {
+      throw createAppError("FORBIDDEN", "You can only discard your own pending photo uploads.", {
+        actorId: user._id,
+        targetType: "listing",
+        targetId: args.storageId,
+      });
+    }
+
+    if (upload.status !== "pending") {
+      throw createAppError("CONFLICT", "Cannot discard a photo that is already attached.");
+    }
+
+    await ctx.storage.delete(upload.storageId);
+    await ctx.db.delete(upload._id);
+
+    return { discarded: true };
+  },
+});
+
+/**
+ * Creates a new Listing owned by the authenticated User, attaching 0–5 verified photos
+ * and atomically recording a `listing.created` Audit Log entry.
+ */
+export const createListing = mutation({
+  args: {
+    name: v.string(),
+    category: listingCategoryValidator,
+    condition: listingConditionValidator,
+    description: v.string(),
+    imageIds: v.optional(v.array(v.id("_storage"))),
+  },
+  returns: v.object({
+    _id: v.id("listings"),
+  }),
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    await enforceRateLimit(ctx, "listingWrite", user._id);
+
+    const { trimmedName, trimmedDescription } = validateListingTextFields(
+      args.name,
+      args.description,
+    );
+    const imageIds = args.imageIds ?? [];
+    const now = Date.now();
+
+    const listingId = await ctx.db.insert("listings", {
+      lenderId: user._id,
+      name: trimmedName,
+      category: args.category,
+      condition: args.condition,
+      description: trimmedDescription,
+      imageIds,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await syncListingImages(ctx, {
+      uploaderId: user._id,
+      listingId,
+      nextImageIds: imageIds,
+    });
+
+    await recordAuditLog(ctx, {
+      actorId: user._id,
+      actorRole: user.role,
+      action: "listing.created",
+      targetType: "listing",
+      targetId: listingId,
+      metadata: {
+        category: args.category,
+        condition: args.condition,
+        imageCount: imageIds.length,
+      },
+    });
+
+    return { _id: listingId };
+  },
+});
+
+/**
+ * Updates an active Listing owned by the authenticated Lender.
+ * Atomically claims newly uploaded photos and permanently deletes removed photos from `_storage`.
+ */
+export const updateListing = mutation({
+  args: {
+    listingId: v.id("listings"),
+    name: v.string(),
+    category: listingCategoryValidator,
+    condition: listingConditionValidator,
+    description: v.string(),
+    imageIds: v.array(v.id("_storage")),
+  },
+  returns: v.object({
+    _id: v.id("listings"),
+    removedImageCount: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const { user, listing } = await requireListingLender(ctx, args.listingId);
+
+    if (listing.archivedAt !== undefined) {
+      throw createAppError("CONFLICT", "Archived Listings cannot be edited.");
+    }
+
+    await enforceRateLimit(ctx, "listingWrite", user._id);
+
+    const { trimmedName, trimmedDescription } = validateListingTextFields(
+      args.name,
+      args.description,
+    );
+
+    const { removedCount } = await syncListingImages(ctx, {
+      uploaderId: user._id,
+      listingId: listing._id,
+      nextImageIds: args.imageIds,
+      existingImageIds: listing.imageIds ?? [],
+    });
+
+    await ctx.db.patch(listing._id, {
+      name: trimmedName,
+      category: args.category,
+      condition: args.condition,
+      description: trimmedDescription,
+      imageIds: args.imageIds,
+      updatedAt: Date.now(),
+    });
+
+    await recordAuditLog(ctx, {
+      actorId: user._id,
+      actorRole: user.role,
+      action: "listing.updated",
+      targetType: "listing",
+      targetId: listing._id,
+      metadata: {
+        category: args.category,
+        condition: args.condition,
+        imageCount: args.imageIds.length,
+        removedImageCount: removedCount,
+      },
+    });
+
+    return { _id: listing._id, removedImageCount: removedCount };
+  },
+});
+
+/**
+ * Archives (soft-deletes) a Listing owned by the authenticated Lender.
+ * - Blocked with CONFLICT if any unreturned `approved` Loan exists.
+ * - Atomically auto-declines all open `pending` Loans.
+ * - Deletes all Listing image blobs from `_storage`.
+ * - Records a `listing.archived` Audit Log entry.
+ */
+export const archiveListing = mutation({
+  args: {
+    listingId: v.id("listings"),
+    reason: v.optional(v.string()),
+  },
+  returns: v.object({
+    _id: v.id("listings"),
+    autoDeclinedCount: v.number(),
+    deletedImageCount: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const { user, listing } = await requireListingLender(ctx, args.listingId);
+
+    if (listing.archivedAt !== undefined) {
+      throw createAppError("CONFLICT", "This Listing is already archived.");
+    }
+
+    await enforceRateLimit(ctx, "listingWrite", user._id);
+
+    const trimmedReason = (args.reason ?? "").trim();
+    if (trimmedReason.length > DOMAIN_LIMITS.MAX_REASON_LENGTH) {
+      throw createAppError(
+        "VALIDATION_ERROR",
+        `Archive reason cannot exceed ${DOMAIN_LIMITS.MAX_REASON_LENGTH} characters.`,
+      );
+    }
+
+    const activeApprovedLoan = await ctx.db
+      .query("loans")
+      .withIndex("by_listing_status", (q) =>
+        q.eq("listingId", listing._id).eq("status", "approved"),
+      )
+      .first();
+
+    if (activeApprovedLoan) {
+      throw createAppError(
+        "CONFLICT",
+        "Cannot delete this Listing while an approved Loan has not been returned. Mark the Loan as returned first.",
+      );
+    }
+
+    const now = Date.now();
+    let autoDeclinedCount = 0;
+
+    for (;;) {
+      const pendingBatch = await ctx.db
+        .query("loans")
+        .withIndex("by_listing_status", (q) =>
+          q.eq("listingId", listing._id).eq("status", "pending"),
+        )
+        .take(ARCHIVE_LOAN_BATCH_SIZE);
+
+      if (pendingBatch.length === 0) {
+        break;
+      }
+
+      for (const loan of pendingBatch) {
+        await ctx.db.patch(loan._id, {
+          status: "declined",
+          decisionReason: "Listing archived",
+          updatedAt: now,
+        });
+        autoDeclinedCount += 1;
+      }
+
+      if (pendingBatch.length < ARCHIVE_LOAN_BATCH_SIZE) {
+        break;
+      }
+    }
+
+    const deletedImageCount = await deleteListingImageBlobs(ctx, listing.imageIds ?? []);
+
+    await ctx.db.patch(listing._id, {
+      archivedAt: now,
+      archivedBy: user._id,
+      archiveReason: trimmedReason || "Archived by Lender",
+      imageIds: [],
+      updatedAt: now,
+    });
+
+    await recordAuditLog(ctx, {
+      actorId: user._id,
+      actorRole: user.role,
+      action: "listing.archived",
+      targetType: "listing",
+      targetId: listing._id,
+      metadata: {
+        autoDeclinedCount,
+        deletedImageCount,
+        actorType: "lender",
+      },
+    });
+
+    return {
+      _id: listing._id,
+      autoDeclinedCount,
+      deletedImageCount,
+    };
+  },
+});
