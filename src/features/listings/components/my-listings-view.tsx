@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import type { AppErrorData } from "../../../../convex/lib/errors";
-import { useHasConvexProvider } from "@/components/providers/app-providers";
+import { useHasConvexProvider, useSyncedCurrentUser } from "@/components/providers/app-providers";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,10 +47,16 @@ function LiveMyListingsView() {
 
   const archiveListing = useMutation(api.listings.mutations.archiveListing);
 
-  const page = useQuery(api.listings.queries.listMyListings, {
-    cursor,
-    limit: DOMAIN_LIMITS.MAX_PAGE_SIZE,
-  });
+  const currentUser = useSyncedCurrentUser();
+  const page = useQuery(
+    api.listings.queries.listMyListings,
+    currentUser
+      ? {
+          cursor,
+          limit: DOMAIN_LIMITS.MAX_PAGE_SIZE,
+        }
+      : "skip",
+  );
 
   const items = useMemo(() => {
     if (cursor === null) {

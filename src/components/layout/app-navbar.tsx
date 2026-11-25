@@ -7,7 +7,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { api } from "../../../convex/_generated/api";
-import { useHasConvexProvider } from "@/components/providers/app-providers";
+import { useHasConvexProvider, useSyncedCurrentUser } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +19,7 @@ const BASE_NAV_LINKS = [
 ] as const;
 
 function IncomingPendingBadge() {
-  const currentUser = useQuery(api.users.queries.getCurrentUser, {});
+  const currentUser = useSyncedCurrentUser();
   const result = useQuery(api.lending.queries.getIncomingPendingCount, currentUser ? {} : "skip");
   const count = result?.count ?? 0;
   if (count <= 0) {
@@ -45,7 +45,7 @@ function AdminNavLink({
   onNavigate?: () => void;
   mobile?: boolean;
 }) {
-  const currentUser = useQuery(api.users.queries.getCurrentUser, {});
+  const currentUser = useSyncedCurrentUser();
   if (currentUser?.role !== "admin") {
     return null;
   }
