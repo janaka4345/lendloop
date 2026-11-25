@@ -20,6 +20,7 @@
     "test:convex": "vitest run --project convex",
     "test:coverage": "vitest run --project unit --coverage",
     "test:e2e": "playwright test",
+    "test:e2e:golden": "playwright test tests/e2e/golden-path.spec.ts",
     "check:workflows": "node scripts/check-workflow-hygiene.mjs",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm check:workflows && pnpm test"
   },
@@ -28,6 +29,7 @@
     "@convex-dev/rate-limiter": "^0.4.3",
     "@hookform/resolvers": "^7.0.8",
     "@radix-ui/react-slot": "^1.5.0",
+    "@sentry/nextjs": "^11.17.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "convex": "^1.51.0",
