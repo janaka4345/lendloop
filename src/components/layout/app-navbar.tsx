@@ -20,10 +20,7 @@ const BASE_NAV_LINKS = [
 
 function IncomingPendingBadge() {
   const currentUser = useQuery(api.users.queries.getCurrentUser, {});
-  const result = useQuery(
-    api.lending.queries.getIncomingPendingCount,
-    currentUser ? {} : "skip",
-  );
+  const result = useQuery(api.lending.queries.getIncomingPendingCount, currentUser ? {} : "skip");
   const count = result?.count ?? 0;
   if (count <= 0) {
     return null;
