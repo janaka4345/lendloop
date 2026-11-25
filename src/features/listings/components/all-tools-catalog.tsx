@@ -198,7 +198,7 @@ function LiveAllToolsCatalog() {
             </Card>
           ))}
         </div>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && (!page || page.isDone) ? (
         <div className="border-border bg-card flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed px-6 py-14 text-center">
           <Wrench className="text-muted-foreground h-9 w-9 opacity-60" aria-hidden="true" />
           {hasActiveFilters ? (

@@ -234,7 +234,7 @@ describe("Listings image uploads, anti-IDOR, pending cap, rate limiting, and ato
       name: "Bob",
     });
 
-    // Reject non-WebP registration
+    // Reject non-WebP registration AND spoofed WebP metadata on an SVG blob
     const rawBlobId = await t.run(async (ctx) => {
       return ctx.storage.store(new Blob(["<svg></svg>"], { type: "image/svg+xml" }));
     });
@@ -242,6 +242,16 @@ describe("Listings image uploads, anti-IDOR, pending cap, rate limiting, and ato
       asAlice.mutation(api.listings.mutations.registerListingImageUpload, {
         storageId: rawBlobId,
         contentType: "image/svg+xml",
+        sizeBytes: 11,
+        width: 100,
+        height: 100,
+      }),
+      "VALIDATION_ERROR",
+    );
+    await expectAppError(
+      asAlice.mutation(api.listings.mutations.registerListingImageUpload, {
+        storageId: rawBlobId,
+        contentType: "image/webp",
         sizeBytes: 11,
         width: 100,
         height: 100,

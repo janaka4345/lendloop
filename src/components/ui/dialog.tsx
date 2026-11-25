@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { Button } from "./button";
 
-export interface ConfirmDialogProps {
+export interface ModalDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
@@ -20,7 +20,7 @@ export function ModalDialog({
   description,
   children,
   footer,
-}: ConfirmDialogProps) {
+}: ModalDialogProps) {
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {

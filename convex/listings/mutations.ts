@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { mutation } from "../_generated/server";
+import type { Id } from "../_generated/dataModel";
+import { mutation, type MutationCtx } from "../_generated/server";
 import { DOMAIN_LIMITS } from "../../src/domain/types";
 import { recordAuditLog } from "../audit/seam";
 import { requireCurrentUser, requireListingLender } from "../lib/authz";
@@ -43,6 +44,27 @@ function validateListingTextFields(name: string, description: string) {
   return { trimmedName, trimmedDescription };
 }
 
+async function assertPendingUploadCapacity(
+  ctx: MutationCtx,
+  uploaderId: Id<"users">,
+  storageIdToDeleteOnExceed?: Id<"_storage">,
+): Promise<void> {
+  const pendingUploads = await ctx.db
+    .query("listingImageUploads")
+    .withIndex("by_uploader_status", (q) => q.eq("uploaderId", uploaderId).eq("status", "pending"))
+    .take(MAX_PENDING_UPLOADS_PER_USER + 1);
+
+  if (pendingUploads.length >= MAX_PENDING_UPLOADS_PER_USER) {
+    if (storageIdToDeleteOnExceed) {
+      await ctx.storage.delete(storageIdToDeleteOnExceed);
+    }
+    throw createAppError(
+      "VALIDATION_ERROR",
+      `You can have at most ${MAX_PENDING_UPLOADS_PER_USER} pending photo uploads at a time. Save or remove pending photos first.`,
+    );
+  }
+}
+
 /**
  * Generates a short-lived Convex storage upload URL for the authenticated User.
  * Enforces 10 uploads/minute rate limiting and the 10-pending-upload cap per User.
@@ -55,18 +77,7 @@ export const generateListingImageUploadUrl = mutation({
   handler: async (ctx) => {
     const user = await requireCurrentUser(ctx);
     await enforceRateLimit(ctx, "listingImageUpload", user._id);
-
-    const pendingUploads = await ctx.db
-      .query("listingImageUploads")
-      .withIndex("by_uploader_status", (q) => q.eq("uploaderId", user._id).eq("status", "pending"))
-      .take(MAX_PENDING_UPLOADS_PER_USER + 1);
-
-    if (pendingUploads.length >= MAX_PENDING_UPLOADS_PER_USER) {
-      throw createAppError(
-        "VALIDATION_ERROR",
-        `You can have at most ${MAX_PENDING_UPLOADS_PER_USER} pending photo uploads at a time. Save or remove pending photos first.`,
-      );
-    }
+    await assertPendingUploadCapacity(ctx, user._id);
 
     const uploadUrl = await ctx.storage.generateUploadUrl();
     return { uploadUrl };
@@ -75,6 +86,7 @@ export const generateListingImageUploadUrl = mutation({
 
 /**
  * Registers a sanitized WebP upload in `listingImageUploads` owned by the authenticated User.
+ * Verifies authoritative `_storage` system metadata (contentType and size) to prevent spoofing.
  */
 export const registerListingImageUpload = mutation({
   args: {
@@ -97,9 +109,6 @@ export const registerListingImageUpload = mutation({
     if (args.contentType !== ALLOWED_STORED_CONTENT_TYPE) {
       throw createAppError("VALIDATION_ERROR", "Only sanitized WebP images can be registered.");
     }
-    if (args.sizeBytes <= 0 || args.sizeBytes > MAX_UPLOAD_BYTES) {
-      throw createAppError("VALIDATION_ERROR", "Uploaded photo exceeds the 5 MB size limit.");
-    }
     if (
       args.width <= 0 ||
       args.width > MAX_SANITIZED_IMAGE_DIMENSION ||
@@ -112,6 +121,22 @@ export const registerListingImageUpload = mutation({
       );
     }
 
+    const storageMeta = await ctx.db.system.get(args.storageId);
+    if (!storageMeta) {
+      throw createAppError("NOT_FOUND", "Uploaded photo blob was not found in storage.");
+    }
+    if (storageMeta.contentType !== ALLOWED_STORED_CONTENT_TYPE) {
+      await ctx.storage.delete(args.storageId);
+      throw createAppError(
+        "VALIDATION_ERROR",
+        "Stored photo must be a sanitized WebP image uploaded via the image endpoint.",
+      );
+    }
+    if (storageMeta.size <= 0 || storageMeta.size > MAX_UPLOAD_BYTES) {
+      await ctx.storage.delete(args.storageId);
+      throw createAppError("VALIDATION_ERROR", "Uploaded photo exceeds the 5 MB size limit.");
+    }
+
     const existing = await ctx.db
       .query("listingImageUploads")
       .withIndex("by_storage_id", (q) => q.eq("storageId", args.storageId))
@@ -121,18 +146,7 @@ export const registerListingImageUpload = mutation({
       throw createAppError("CONFLICT", "This uploaded photo has already been registered.");
     }
 
-    const pendingUploads = await ctx.db
-      .query("listingImageUploads")
-      .withIndex("by_uploader_status", (q) => q.eq("uploaderId", user._id).eq("status", "pending"))
-      .take(MAX_PENDING_UPLOADS_PER_USER + 1);
-
-    if (pendingUploads.length >= MAX_PENDING_UPLOADS_PER_USER) {
-      await ctx.storage.delete(args.storageId);
-      throw createAppError(
-        "VALIDATION_ERROR",
-        `You can have at most ${MAX_PENDING_UPLOADS_PER_USER} pending photo uploads at a time.`,
-      );
-    }
+    await assertPendingUploadCapacity(ctx, user._id, args.storageId);
 
     const url = await ctx.storage.getUrl(args.storageId);
     if (!url) {
@@ -143,8 +157,8 @@ export const registerListingImageUpload = mutation({
       storageId: args.storageId,
       uploaderId: user._id,
       status: "pending",
-      contentType: args.contentType,
-      sizeBytes: args.sizeBytes,
+      contentType: storageMeta.contentType,
+      sizeBytes: storageMeta.size,
       width: args.width,
       height: args.height,
       createdAt: Date.now(),
@@ -155,7 +169,7 @@ export const registerListingImageUpload = mutation({
       url,
       width: args.width,
       height: args.height,
-      sizeBytes: args.sizeBytes,
+      sizeBytes: storageMeta.size,
     };
   },
 });

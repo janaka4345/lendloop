@@ -347,7 +347,7 @@ export function ListingForm({ mode, initialValues }: ListingFormProps) {
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label htmlFor="listing-name">Tool name</Label>
+          <Label htmlFor="listing-name">Listing name</Label>
           <span className="text-muted-foreground text-xs">
             {nameValue.length} / {DOMAIN_LIMITS.MAX_LISTING_NAME_LENGTH}
           </span>
@@ -357,9 +357,14 @@ export function ListingForm({ mode, initialValues }: ListingFormProps) {
           placeholder="e.g., DeWalt 20V Cordless Hammer Drill"
           maxLength={DOMAIN_LIMITS.MAX_LISTING_NAME_LENGTH}
           aria-invalid={Boolean(errors.name)}
+          aria-describedby={errors.name ? "listing-name-error" : undefined}
           {...register("name")}
         />
-        {errors.name ? <p className="text-destructive text-xs">{errors.name.message}</p> : null}
+        {errors.name ? (
+          <p id="listing-name-error" className="text-destructive text-xs">
+            {errors.name.message}
+          </p>
+        ) : null}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -414,10 +419,13 @@ export function ListingForm({ mode, initialValues }: ListingFormProps) {
           placeholder="Describe included accessories, battery/power requirements, and care instructions."
           maxLength={DOMAIN_LIMITS.MAX_LISTING_DESCRIPTION_LENGTH}
           aria-invalid={Boolean(errors.description)}
+          aria-describedby={errors.description ? "listing-description-error" : undefined}
           {...register("description")}
         />
         {errors.description ? (
-          <p className="text-destructive text-xs">{errors.description.message}</p>
+          <p id="listing-description-error" className="text-destructive text-xs">
+            {errors.description.message}
+          </p>
         ) : null}
       </div>
 

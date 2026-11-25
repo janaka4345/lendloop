@@ -73,7 +73,7 @@ function LivePublicListingsGrid() {
     );
   }
 
-  if (items.length === 0) {
+  if (items.length === 0 && (!page || page.isDone)) {
     return (
       <div className="border-border bg-card flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-12 text-center">
         <Wrench className="text-muted-foreground h-8 w-8 opacity-70" aria-hidden="true" />

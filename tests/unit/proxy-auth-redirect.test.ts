@@ -60,4 +60,32 @@ describe("Next.js Clerk auth proxy and protected deep-link redirects", () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "Authentication is required." });
   });
+
+  it("redirects signed-in Users visiting / straight to /listings", async () => {
+    process.env.CLERK_PUBLISHABLE_KEY = `pk_test_${Buffer.from("clerk.example.com$").toString("base64")}`;
+    vi.doMock("@clerk/nextjs/server", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("@clerk/nextjs/server")>();
+      return {
+        ...actual,
+        clerkMiddleware:
+          (
+            handler: (
+              auth: () => Promise<{ userId: string }>,
+              req: NextRequest,
+            ) => Promise<Response>,
+          ) =>
+          (req: NextRequest) =>
+            handler(async () => ({ userId: "user_signed_in" }), req),
+      };
+    });
+
+    const { proxy } = await import("@/proxy");
+    const request = new NextRequest("http://localhost:3000/");
+    const response = await proxy(request, createFakeEvent());
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://localhost:3000/listings");
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+    vi.doUnmock("@clerk/nextjs/server");
+  });
 });
