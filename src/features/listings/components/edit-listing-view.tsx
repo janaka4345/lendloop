@@ -27,13 +27,23 @@ class EditListingErrorBoundary extends Component<
     return { error };
   }
 
+  componentDidUpdate(prevProps: { listingId: string; children: ReactNode }) {
+    if (this.state.error && prevProps.listingId !== this.props.listingId) {
+      this.setState({ error: null });
+    }
+  }
+
+  private handleRetry = () => {
+    this.setState({ error: null });
+  };
+
   render() {
     if (!this.state.error) {
       return this.props.children;
     }
 
     let code: AppErrorData["code"] | null = null;
-    let message = "Unable to load this Listing for editing.";
+    let message: string | null = null;
     if (this.state.error instanceof ConvexError) {
       const data = this.state.error.data as Partial<AppErrorData> | undefined;
       if (data?.code) code = data.code;
@@ -42,6 +52,21 @@ class EditListingErrorBoundary extends Component<
 
     const isForbidden = code === "FORBIDDEN";
     const isNotFound = code === "NOT_FOUND";
+    const isUnauthenticated = code === "UNAUTHENTICATED";
+    const isRetryable = !isForbidden && !isNotFound;
+
+    const title = isForbidden
+      ? "Permission denied"
+      : isNotFound
+        ? "Listing not found"
+        : isUnauthenticated
+          ? "Authentication required"
+          : "Unable to edit Listing";
+    const description = isForbidden
+      ? "Only the Lender who created this Listing can edit it."
+      : isUnauthenticated
+        ? (message ?? "Your session is not ready yet. Please try again.")
+        : (message ?? "Unable to load this Listing for editing.");
 
     return (
       <div className="space-y-4">
@@ -49,27 +74,24 @@ class EditListingErrorBoundary extends Component<
           <div className="flex items-start gap-2.5">
             <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
             <div className="space-y-1">
-              <AlertTitle>
-                {isForbidden
-                  ? "Permission denied"
-                  : isNotFound
-                    ? "Listing not found"
-                    : "Unable to edit Listing"}
-              </AlertTitle>
-              <AlertDescription>
-                {isForbidden ? "Only the Lender who created this Listing can edit it." : message}
-              </AlertDescription>
+              <AlertTitle>{title}</AlertTitle>
+              <AlertDescription>{description}</AlertDescription>
             </div>
           </div>
         </Alert>
 
         <div className="flex flex-wrap gap-3">
+          {isRetryable ? (
+            <Button type="button" onClick={this.handleRetry}>
+              Try again
+            </Button>
+          ) : null}
           {isForbidden ? (
             <Button asChild variant="outline">
               <Link href={`/listings/${this.props.listingId}`}>Back to Listing</Link>
             </Button>
           ) : null}
-          <Button asChild>
+          <Button asChild variant={isRetryable ? "outline" : "default"}>
             <Link href="/listings">Back to All Tools</Link>
           </Button>
         </div>
@@ -121,7 +143,7 @@ export function EditListingView({ listingId }: { listingId: string }) {
   }
 
   return (
-    <EditListingErrorBoundary listingId={listingId}>
+    <EditListingErrorBoundary key={listingId} listingId={listingId}>
       <LiveEditListingContent listingId={listingId as Id<"listings">} />
     </EditListingErrorBoundary>
   );
