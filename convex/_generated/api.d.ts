@@ -9,6 +9,7 @@
  */
 
 import type * as audit_index from "../audit/index.js";
+import type * as audit_queries from "../audit/queries.js";
 import type * as audit_seam from "../audit/seam.js";
 import type * as automation_index from "../automation/index.js";
 import type * as automation_seam from "../automation/seam.js";
@@ -41,6 +42,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   "audit/index": typeof audit_index;
+  "audit/queries": typeof audit_queries;
   "audit/seam": typeof audit_seam;
   "automation/index": typeof automation_index;
   "automation/seam": typeof automation_seam;

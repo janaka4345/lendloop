@@ -3,7 +3,8 @@ import type { Id } from "../_generated/dataModel";
 import { mutation, type MutationCtx } from "../_generated/server";
 import { DOMAIN_LIMITS } from "../../src/domain/types";
 import { recordAuditLog } from "../audit/seam";
-import { requireCurrentUser, requireListingLender } from "../lib/authz";
+import { enqueueAutomationActivity } from "../automation/seam";
+import { requireAdmin, requireCurrentUser, requireListingLender } from "../lib/authz";
 import { createAppError } from "../lib/errors";
 import { enforceRateLimit } from "../lib/rateLimit";
 import { listingCategoryValidator, listingConditionValidator } from "../schema";
@@ -17,6 +18,69 @@ import {
 } from "./images";
 
 const ARCHIVE_LOAN_BATCH_SIZE = 100;
+
+async function autoDeclinePendingLoansForListing(
+  ctx: MutationCtx,
+  params: {
+    listingId: Id<"listings">;
+    decisionReason: string;
+    reasonCode: "listing_archived_by_lender" | "listing_removed_by_admin";
+    now: number;
+    emitAuditAndNotification: boolean;
+  },
+): Promise<number> {
+  let autoDeclinedCount = 0;
+
+  for (;;) {
+    const pendingBatch = await ctx.db
+      .query("loans")
+      .withIndex("by_listing_status", (q) =>
+        q.eq("listingId", params.listingId).eq("status", "pending"),
+      )
+      .take(ARCHIVE_LOAN_BATCH_SIZE);
+
+    if (pendingBatch.length === 0) {
+      break;
+    }
+
+    for (const loan of pendingBatch) {
+      await ctx.db.patch(loan._id, {
+        status: "declined",
+        decisionReason: params.decisionReason,
+        updatedAt: params.now,
+      });
+
+      if (params.emitAuditAndNotification) {
+        await recordAuditLog(ctx, {
+          actorRole: "system",
+          action: "loan.declined",
+          targetType: "loan",
+          targetId: loan._id,
+          metadata: {
+            listingId: params.listingId,
+            autoDeclined: true,
+            reasonCode: params.reasonCode,
+          },
+        });
+
+        await enqueueAutomationActivity(ctx, {
+          loanId: loan._id,
+          eventType: "loan_declined",
+          idempotencyKey: `loan_declined:${loan._id}`,
+          recipientRole: "borrower",
+        });
+      }
+
+      autoDeclinedCount += 1;
+    }
+
+    if (pendingBatch.length < ARCHIVE_LOAN_BATCH_SIZE) {
+      break;
+    }
+  }
+
+  return autoDeclinedCount;
+}
 
 function validateListingTextFields(name: string, description: string) {
   const trimmedName = name.trim();
@@ -389,33 +453,13 @@ export const archiveListing = mutation({
     }
 
     const now = Date.now();
-    let autoDeclinedCount = 0;
-
-    for (;;) {
-      const pendingBatch = await ctx.db
-        .query("loans")
-        .withIndex("by_listing_status", (q) =>
-          q.eq("listingId", listing._id).eq("status", "pending"),
-        )
-        .take(ARCHIVE_LOAN_BATCH_SIZE);
-
-      if (pendingBatch.length === 0) {
-        break;
-      }
-
-      for (const loan of pendingBatch) {
-        await ctx.db.patch(loan._id, {
-          status: "declined",
-          decisionReason: "Listing archived",
-          updatedAt: now,
-        });
-        autoDeclinedCount += 1;
-      }
-
-      if (pendingBatch.length < ARCHIVE_LOAN_BATCH_SIZE) {
-        break;
-      }
-    }
+    const autoDeclinedCount = await autoDeclinePendingLoansForListing(ctx, {
+      listingId: listing._id,
+      decisionReason: "Listing archived",
+      reasonCode: "listing_archived_by_lender",
+      now,
+      emitAuditAndNotification: false,
+    });
 
     const deletedImageCount = await deleteListingImageBlobs(ctx, listing.imageIds ?? []);
 
@@ -444,6 +488,102 @@ export const archiveListing = mutation({
       _id: listing._id,
       autoDeclinedCount,
       deletedImageCount,
+    };
+  },
+});
+
+/**
+ * Admin-only forced Listing removal (`/admin` → Listings tab).
+ * - Requires a non-empty `archiveReason` (<= 300 chars).
+ * - Allowed EVEN when unreturned `approved` Loans exist (active Loans remain returnable
+ *   and are flagged as `"Listing removed"` via `listing.isArchived`).
+ * - Atomically auto-declines open `pending` Loans (recording Audit Log + `loan_declined` Automation Activity).
+ * - Immediately deletes all Listing image blobs from `_storage`.
+ * - Writes an atomic `listing.archived` Audit Log entry with zero PII.
+ */
+export const adminRemoveListing = mutation({
+  args: {
+    listingId: v.id("listings"),
+    archiveReason: v.string(),
+  },
+  returns: v.object({
+    _id: v.id("listings"),
+    autoDeclinedCount: v.number(),
+    deletedImageCount: v.number(),
+    activeApprovedLoanCount: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const admin = await requireAdmin(ctx);
+    await enforceRateLimit(ctx, "adminWrite", admin._id);
+
+    const trimmedReason = args.archiveReason.trim();
+    if (trimmedReason.length === 0) {
+      throw createAppError(
+        "VALIDATION_ERROR",
+        "An archive reason is required to remove a Listing.",
+      );
+    }
+    if (trimmedReason.length > DOMAIN_LIMITS.MAX_REASON_LENGTH) {
+      throw createAppError(
+        "VALIDATION_ERROR",
+        `Archive reason cannot exceed ${DOMAIN_LIMITS.MAX_REASON_LENGTH} characters.`,
+      );
+    }
+
+    const listing = await ctx.db.get(args.listingId);
+    if (!listing) {
+      throw createAppError("NOT_FOUND", "Listing not found.");
+    }
+    if (listing.archivedAt !== undefined) {
+      throw createAppError("CONFLICT", "This Listing is already archived.");
+    }
+
+    const activeApprovedLoans = await ctx.db
+      .query("loans")
+      .withIndex("by_listing_status", (q) =>
+        q.eq("listingId", listing._id).eq("status", "approved"),
+      )
+      .take(ARCHIVE_LOAN_BATCH_SIZE);
+    const activeApprovedLoanCount = activeApprovedLoans.length;
+
+    const now = Date.now();
+    const autoDeclinedCount = await autoDeclinePendingLoansForListing(ctx, {
+      listingId: listing._id,
+      decisionReason: "Listing removed by Admin",
+      reasonCode: "listing_removed_by_admin",
+      now,
+      emitAuditAndNotification: true,
+    });
+
+    const deletedImageCount = await deleteListingImageBlobs(ctx, listing.imageIds ?? []);
+
+    await ctx.db.patch(listing._id, {
+      archivedAt: now,
+      archivedBy: admin._id,
+      archiveReason: trimmedReason,
+      imageIds: [],
+      updatedAt: now,
+    });
+
+    await recordAuditLog(ctx, {
+      actorId: admin._id,
+      actorRole: admin.role,
+      action: "listing.archived",
+      targetType: "listing",
+      targetId: listing._id,
+      metadata: {
+        actorType: "admin",
+        autoDeclinedCount,
+        deletedImageCount,
+        activeApprovedLoanCount,
+      },
+    });
+
+    return {
+      _id: listing._id,
+      autoDeclinedCount,
+      deletedImageCount,
+      activeApprovedLoanCount,
     };
   },
 });

@@ -4,8 +4,16 @@ import { query, type QueryCtx } from "../_generated/server";
 import { todayUtcDate } from "../../src/domain/dates";
 import { canTransitionLoan, findOverlappingLoans, isLoanOverdue } from "../../src/domain/loan";
 import { DOMAIN_LIMITS } from "../../src/domain/types";
-import { requireCurrentUser, requireLoanParticipantOrAdmin } from "../lib/authz";
-import { loanCardDtoValidator, loanSectionsDtoValidator, toLoanCardDto } from "./dto";
+import { requireAdmin, requireCurrentUser, requireLoanParticipantOrAdmin } from "../lib/authz";
+import { clampPageSize } from "../lib/pagination";
+import { loanStatusValidator } from "../schema";
+import {
+  adminLoanDtoValidator,
+  loanCardDtoValidator,
+  loanSectionsDtoValidator,
+  toAdminLoanDto,
+  toLoanCardDto,
+} from "./dto";
 
 const STATUS_QUERY_BOUND = DOMAIN_LIMITS.MAX_PAGE_SIZE;
 const AUTOMATION_TIMELINE_LIMIT = 20;
@@ -284,5 +292,102 @@ export const getLoanById = query({
       listingCache: new Map(),
       userCache: new Map(),
     });
+  },
+});
+
+/**
+ * Admin-only paginated All Loans query (`/admin` → All Loans tab).
+ * Filterable by `status` and derived `Overdue` state, returning each Loan's expandable
+ * `Automation Activity` timeline including sanitized `lastError` summaries.
+ */
+export const listAllLoansForAdmin = query({
+  args: {
+    status: v.optional(loanStatusValidator),
+    overdueOnly: v.optional(v.boolean()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    items: v.array(adminLoanDtoValidator),
+    continueCursor: v.string(),
+    isDone: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    if (args.overdueOnly && args.status !== undefined && args.status !== "approved") {
+      return {
+        items: [],
+        continueCursor: "",
+        isDone: true,
+      };
+    }
+
+    const numItems = clampPageSize(args.limit);
+    const todayUtc = todayUtcDate();
+
+    const pageResult = args.overdueOnly
+      ? await ctx.db
+          .query("loans")
+          .withIndex("by_status_end_date", (q) =>
+            q.eq("status", "approved").lt("endDate", todayUtc),
+          )
+          .order("asc")
+          .paginate({ numItems, cursor: args.cursor ?? null })
+      : args.status !== undefined
+        ? await ctx.db
+            .query("loans")
+            .withIndex("by_status_start_date", (q) => q.eq("status", args.status!))
+            .order("desc")
+            .paginate({ numItems, cursor: args.cursor ?? null })
+        : await ctx.db
+            .query("loans")
+            .order("desc")
+            .paginate({ numItems, cursor: args.cursor ?? null });
+
+    const listingCache = new Map<Id<"listings">, Doc<"listings"> | null>();
+    const userCache = new Map<Id<"users">, Doc<"users"> | null>();
+
+    const items = await Promise.all(
+      pageResult.page.map(async (loan) => {
+        let listing = listingCache.get(loan.listingId);
+        if (listing === undefined) {
+          listing = await ctx.db.get(loan.listingId);
+          listingCache.set(loan.listingId, listing);
+        }
+
+        let lender = userCache.get(loan.lenderId);
+        if (lender === undefined) {
+          lender = await ctx.db.get(loan.lenderId);
+          userCache.set(loan.lenderId, lender);
+        }
+
+        let borrower = userCache.get(loan.borrowerId);
+        if (borrower === undefined) {
+          borrower = await ctx.db.get(loan.borrowerId);
+          userCache.set(loan.borrowerId, borrower);
+        }
+
+        const automationActivities = await ctx.db
+          .query("automationActivities")
+          .withIndex("by_loan_created", (q) => q.eq("loanId", loan._id))
+          .order("desc")
+          .take(AUTOMATION_TIMELINE_LIMIT);
+
+        return toAdminLoanDto(loan, {
+          isOverdue: isLoanOverdue(loan, todayUtc),
+          listing,
+          lender,
+          borrower,
+          automationActivities,
+        });
+      }),
+    );
+
+    return {
+      items,
+      continueCursor: pageResult.continueCursor,
+      isDone: pageResult.isDone,
+    };
   },
 });
