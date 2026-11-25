@@ -100,7 +100,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const batch = $input.first().json || {};\nconst items = Array.isArray(batch.items) ? batch.items : [];\nconst config = $('Config').first().json;\n\nreturn items.map((loan) => ({\n  json: {\n    ...loan,\n    fromEmail: config.fromEmail,\n    appUrl: config.appUrl,\n    subject: `[LendLoop] Overdue return reminder: ${loan.listingName}`,\n    text: `Hi ${loan.borrowerName || 'Neighbor'},\\n\\nYour Loan for \"${loan.listingName}\" from ${loan.lenderName || 'your neighbor'} was due on ${loan.endDate} (${loan.daysOverdue} day(s) overdue).\\n\\nPlease coordinate returning the tool soon: ${config.appUrl}/my-requests\\n`,\n  },\n}));"
+        "jsCode": "const batch = $input.first().json || {};\nconst items = Array.isArray(batch.items) ? batch.items : [];\nconst config = $('Config').first().json;\n\nreturn items.map((loan) => ({\n  json: {\n    ...loan,\n    fromEmail: config.fromEmail,\n    appUrl: config.appUrl,\n    subject: `[LendLoop] Overdue return reminder: ${loan.listingName}`,\n    text: `Hi ${loan.borrowerName || 'Neighbor'},\\n\\nYour Loan for \"${loan.listingName}\" from ${loan.lenderName || 'your neighbor'} was due on ${loan.endDate} (${loan.daysOverdue} day(s) overdue).\\n\\nPlease coordinate returning the Listing soon: ${config.appUrl}/my-requests\\n`,\n  },\n}));"
       },
       "id": "b2a00002-0000-4000-8000-000000000004",
       "name": "Expand Batch Items",
@@ -173,7 +173,7 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "onError": "continueRegularOutput",
+      "onError": "continueErrorOutput",
       "credentials": {
         "httpHeaderAuth": {
           "id": "__REPLACE_ON_IMPORT__",
@@ -209,7 +209,7 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "onError": "continueRegularOutput",
+      "onError": "continueErrorOutput",
       "credentials": {
         "httpHeaderAuth": {
           "id": "__REPLACE_ON_IMPORT__",

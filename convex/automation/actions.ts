@@ -38,7 +38,7 @@ export const deliverLoanNotification = internalAction({
         activityId: args.activityId,
         status: "failed",
         attemptCount: 0,
-        lastError: "Skipped delivery: recipient account deleted or missing email.",
+        lastError: "Skipped delivery: recipient User deleted or missing email.",
         completedAt: Date.now(),
       });
       console.info(
@@ -120,19 +120,30 @@ export const deliverLoanNotification = internalAction({
 
       httpStatus = response.status;
       if (response.ok) {
-        await ctx.runMutation(internal.automation.internal.recordDeliveryOutcome, {
-          activityId: args.activityId,
-          status: "sent",
-          attemptCount: attempt,
-          completedAt: Date.now(),
-        });
-        return { outcome: "sent" as const, attempt };
+        const rawResponse = await response.text().catch(() => "");
+        let parsedStatus: unknown = null;
+        try {
+          parsedStatus = (JSON.parse(rawResponse) as { status?: unknown })?.status;
+        } catch {
+          parsedStatus = null;
+        }
+        if (parsedStatus === "smtp_accepted" || parsedStatus === "duplicate") {
+          await ctx.runMutation(internal.automation.internal.recordDeliveryOutcome, {
+            activityId: args.activityId,
+            status: "sent",
+            attemptCount: attempt,
+            completedAt: Date.now(),
+          });
+          return { outcome: "sent" as const, attempt };
+        }
+        httpStatus = 502;
+        errorDetail = `Unexpected webhook 2xx response status: ${redactText(rawResponse.slice(0, 120)) || "empty"}`;
+      } else {
+        const responseSnippet = redactText((await response.text().catch(() => "")).slice(0, 160));
+        errorDetail = responseSnippet
+          ? `HTTP ${httpStatus}: ${responseSnippet}`
+          : `HTTP ${httpStatus}`;
       }
-
-      const responseSnippet = redactText((await response.text().catch(() => "")).slice(0, 160));
-      errorDetail = responseSnippet
-        ? `HTTP ${httpStatus}: ${responseSnippet}`
-        : `HTTP ${httpStatus}`;
     } catch (error) {
       httpStatus = 0;
       const message = error instanceof Error ? error.message : "Network error";
