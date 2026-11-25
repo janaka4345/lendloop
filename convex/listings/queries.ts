@@ -335,12 +335,14 @@ export const getListingDetail = query({
           q.eq("listingId", listing._id).eq("status", "approved"),
         )
         .take(LOAN_LOOKUP_BOUND),
-      ctx.db
-        .query("loans")
-        .withIndex("by_listing_status", (q) =>
-          q.eq("listingId", listing._id).eq("status", "pending"),
-        )
-        .take(LOAN_LOOKUP_BOUND),
+      isOwnListing
+        ? ctx.db
+            .query("loans")
+            .withIndex("by_listing_status", (q) =>
+              q.eq("listingId", listing._id).eq("status", "pending"),
+            )
+            .take(LOAN_LOOKUP_BOUND)
+        : Promise.resolve(null),
       ctx.db.get(listing.lenderId),
       resolveListingImageUrls(ctx, listing.imageIds),
     ]);
@@ -360,7 +362,7 @@ export const getListingDetail = query({
       lender,
       bookedRanges,
       isOwnListing,
-      pendingRequestCount: pendingLoans.length,
+      ...(pendingLoans !== null ? { pendingRequestCount: pendingLoans.length } : {}),
     });
   },
 });

@@ -9,7 +9,7 @@ export default function IncomingRequestsPage() {
         <header className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Incoming Requests</h1>
           <p className="text-muted-foreground text-sm">
-            Review Borrower requests, approve conflict-free dates, and mark tools returned.
+            Review Borrower requests, approve conflict-free dates, and mark Listings returned.
           </p>
         </header>
         <LoansBoardView mode="lender" />

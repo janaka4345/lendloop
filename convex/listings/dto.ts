@@ -91,7 +91,7 @@ export const listingDetailDtoValidator = v.object({
   isArchived: v.boolean(),
   archiveReason: v.optional(v.string()),
   isOwnListing: v.boolean(),
-  pendingRequestCount: v.number(),
+  pendingRequestCount: v.optional(v.number()),
   createdAt: v.number(),
 });
 
@@ -180,7 +180,7 @@ export function toListingDetailDto(
     lender: Doc<"users"> | null;
     bookedRanges: Array<{ startDate: string; endDate: string }>;
     isOwnListing: boolean;
-    pendingRequestCount: number;
+    pendingRequestCount?: number;
   },
 ) {
   const isArchived = listing.archivedAt !== undefined;
@@ -203,7 +203,9 @@ export function toListingDetailDto(
       ? { archiveReason: listing.archiveReason }
       : {}),
     isOwnListing: params.isOwnListing,
-    pendingRequestCount: params.pendingRequestCount,
+    ...(params.pendingRequestCount !== undefined
+      ? { pendingRequestCount: params.pendingRequestCount }
+      : {}),
     createdAt: listing.createdAt,
   };
 }

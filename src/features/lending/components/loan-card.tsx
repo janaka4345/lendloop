@@ -1,7 +1,6 @@
 "use client";
 
 import { useMutation } from "convex/react";
-import { ConvexError } from "convex/values";
 import {
   AlertTriangle,
   Award,
@@ -16,7 +15,6 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import type { AppErrorData } from "../../../../convex/lib/errors";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,7 +23,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { calculateInclusiveDays } from "@/domain/dates";
 import { DOMAIN_LIMITS, type ListingCategory, type LoanStatus } from "@/domain/types";
-import { LOAN_STATUS_LABELS, declineLoanSchema } from "@/features/lending/schema";
+import {
+  LOAN_STATUS_LABELS,
+  declineLoanSchema,
+  extractAppErrorMessage,
+} from "@/features/lending/schema";
 import { CATEGORY_LABELS } from "@/features/listings/schema";
 import { cn } from "@/lib/utils";
 import {
@@ -64,17 +66,6 @@ export interface LoanCardItem {
   automationActivities: ReadonlyArray<LoanAutomationActivityItem>;
 }
 
-function extractErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ConvexError) {
-    const data = error.data as Partial<AppErrorData> | undefined;
-    if (data?.message) return data.message;
-  }
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return fallback;
-}
-
 type DialogKind = "approve" | "decline" | "cancel" | "return" | null;
 
 export function LoanCard({ loan }: { loan: LoanCardItem }) {
@@ -110,7 +101,7 @@ export function LoanCard({ loan }: { loan: LoanCardItem }) {
       );
       setActiveDialog(null);
     } catch (error) {
-      setDialogError(extractErrorMessage(error, "Could not approve Loan."));
+      setDialogError(extractAppErrorMessage(error, "Could not approve Loan."));
     } finally {
       setSubmitting(false);
     }
@@ -134,7 +125,7 @@ export function LoanCard({ loan }: { loan: LoanCardItem }) {
       setActiveDialog(null);
       setDeclineReason("");
     } catch (error) {
-      setDialogError(extractErrorMessage(error, "Could not decline Loan."));
+      setDialogError(extractAppErrorMessage(error, "Could not decline Loan."));
     } finally {
       setSubmitting(false);
     }
@@ -148,7 +139,7 @@ export function LoanCard({ loan }: { loan: LoanCardItem }) {
       toast.success("Loan cancelled.");
       setActiveDialog(null);
     } catch (error) {
-      setDialogError(extractErrorMessage(error, "Could not cancel Loan."));
+      setDialogError(extractAppErrorMessage(error, "Could not cancel Loan."));
     } finally {
       setSubmitting(false);
     }
@@ -162,7 +153,7 @@ export function LoanCard({ loan }: { loan: LoanCardItem }) {
       toast.success("Loan marked as returned.");
       setActiveDialog(null);
     } catch (error) {
-      setDialogError(extractErrorMessage(error, "Could not mark Loan as returned."));
+      setDialogError(extractAppErrorMessage(error, "Could not mark Loan as returned."));
     } finally {
       setSubmitting(false);
     }

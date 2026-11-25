@@ -230,6 +230,25 @@ describe("Lending lifecycle, conflict auto-decline, DTO privacy & RBAC", () => {
       }),
       "CONFLICT",
     );
+
+    // Approving a pending Loan that overlaps an existing approved Loan is rejected with CONFLICT
+    const conflictingPendingId = await t.run(async (ctx) => {
+      const loanADoc = await ctx.db.get(loanA);
+      return ctx.db.insert("loans", {
+        listingId,
+        lenderId: loanADoc!.lenderId,
+        borrowerId: loanADoc!.borrowerId,
+        startDate: shiftUtcDays(today, 4),
+        endDate: shiftUtcDays(today, 7),
+        status: "pending",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    });
+    await expectAppError(
+      lenderAuth.mutation(api.lending.mutations.approveLoan, { loanId: conflictingPendingId }),
+      "CONFLICT",
+    );
   });
 
   it("enforces decline, pre-startDate cancellation boundary, and return on archived Listing", async () => {

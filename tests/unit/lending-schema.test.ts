@@ -60,4 +60,26 @@ describe("lending form schemas", () => {
       true,
     );
   });
+
+  it("rejects ranges overlapping already approved Loan dates on the client", () => {
+    const schema = borrowRequestSchema(today, [
+      { startDate: addDaysUtc(today, 2), endDate: addDaysUtc(today, 4) },
+    ]);
+
+    expect(
+      schema.safeParse({
+        startDate: addDaysUtc(today, 1),
+        endDate: addDaysUtc(today, 2),
+        note: "",
+      }).success,
+    ).toBe(false);
+
+    expect(
+      schema.safeParse({
+        startDate: addDaysUtc(today, 5),
+        endDate: addDaysUtc(today, 6),
+        note: "",
+      }).success,
+    ).toBe(true);
+  });
 });

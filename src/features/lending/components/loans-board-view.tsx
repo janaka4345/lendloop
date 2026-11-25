@@ -102,7 +102,7 @@ function LiveLoansBoard({ mode }: { mode: "borrower" | "lender" }) {
             </h2>
             <p className="text-muted-foreground mx-auto mt-1 max-w-md text-sm">
               {mode === "borrower"
-                ? "Browse neighborhood tools in All Tools to request your next Loan."
+                ? "Browse neighborhood Listings in All Tools to request your next Loan."
                 : "When neighbors request to borrow your Listings, they will appear here."}
             </p>
             <div className="mt-5">

@@ -2,7 +2,6 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "convex/react";
-import { ConvexError } from "convex/values";
 import {
   AlertTriangle,
   Award,
@@ -20,7 +19,6 @@ import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import type { AppErrorData } from "../../../../convex/lib/errors";
 import { useHasConvexProvider } from "@/components/providers/app-providers";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -32,23 +30,13 @@ import { todayUtcDate } from "@/domain/dates";
 import { DOMAIN_LIMITS } from "@/domain/types";
 import {
   borrowRequestSchema,
+  extractAppErrorMessage,
   type BorrowRequestInput,
   type BorrowRequestValues,
 } from "@/features/lending/schema";
 import { CATEGORY_LABELS, CONDITION_LABELS } from "@/features/listings/schema";
 import { ListingHeroGallery } from "./listing-hero-gallery";
 import { UtcRangeCalendar } from "./utc-range-calendar";
-
-function extractErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ConvexError) {
-    const data = error.data as Partial<AppErrorData> | undefined;
-    if (data?.message) return data.message;
-  }
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return fallback;
-}
 
 class ListingDetailErrorBoundary extends Component<{ children: ReactNode }, { error: unknown }> {
   state = { error: null as unknown };
@@ -94,7 +82,10 @@ function BorrowRequestCard({
   const requestLoan = useMutation(api.lending.mutations.requestLoan);
   const [serverError, setServerError] = useState<string | null>(null);
   const todayUtc = useMemo(() => todayUtcDate(), []);
-  const schema = useMemo(() => borrowRequestSchema(todayUtc), [todayUtc]);
+  const schema = useMemo(
+    () => borrowRequestSchema(todayUtc, bookedRanges),
+    [todayUtc, bookedRanges],
+  );
 
   const {
     register,
@@ -129,7 +120,7 @@ function BorrowRequestCard({
       router.push("/my-requests");
     } catch (error) {
       // Preserve form inputs on overlap race condition or validation error
-      setServerError(extractErrorMessage(error, "Could not submit Loan request."));
+      setServerError(extractAppErrorMessage(error, "Could not submit Loan request."));
     }
   });
 
@@ -386,7 +377,7 @@ function LiveListingDetailContent({ listingId }: { listingId: Id<"listings"> }) 
                   <Link href="/incoming-requests">
                     <Inbox className="h-4 w-4" aria-hidden="true" />
                     Incoming Requests
-                    {listing.pendingRequestCount > 0 ? (
+                    {(listing.pendingRequestCount ?? 0) > 0 ? (
                       <Badge className="ml-1.5">{listing.pendingRequestCount} pending</Badge>
                     ) : null}
                   </Link>
