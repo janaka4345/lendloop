@@ -49,4 +49,15 @@ describe("Next.js Clerk auth proxy and protected deep-link redirects", () => {
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     }
   });
+
+  it("returns 401 JSON for unauthenticated requests to protected API routes", async () => {
+    const { proxy } = await import("@/proxy");
+    const request = new NextRequest("http://localhost:3000/api/uploads/listing-image", {
+      method: "POST",
+    });
+    const response = await proxy(request, createFakeEvent());
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Authentication is required." });
+  });
 });

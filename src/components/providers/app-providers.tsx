@@ -3,9 +3,16 @@
 import { ClerkProvider, useAuth } from "@clerk/nextjs";
 import { ConvexReactClient, useConvexAuth, useMutation } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { Toaster } from "sonner";
 import { api } from "../../../convex/_generated/api";
 import { isSyntheticClerkKey, type PublicRuntimeConfig } from "@/lib/runtime-config";
+
+const ConvexAvailableContext = createContext<boolean>(false);
+
+export function useHasConvexProvider(): boolean {
+  return useContext(ConvexAvailableContext);
+}
 
 function AuthenticatedUserSync() {
   const { isAuthenticated, isLoading } = useConvexAuth();
@@ -44,7 +51,12 @@ export function AppProviders({
   }, [convexUrl]);
 
   if (!config || !convexClient || isSyntheticClerkKey(config.clerkPublishableKey)) {
-    return <>{children}</>;
+    return (
+      <ConvexAvailableContext.Provider value={false}>
+        {children}
+        <Toaster richColors position="bottom-right" />
+      </ConvexAvailableContext.Provider>
+    );
   }
 
   return (
@@ -56,8 +68,11 @@ export function AppProviders({
       signUpFallbackRedirectUrl="/listings"
     >
       <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}>
-        <AuthenticatedUserSync />
-        {children}
+        <ConvexAvailableContext.Provider value={true}>
+          <AuthenticatedUserSync />
+          {children}
+          <Toaster richColors position="bottom-right" />
+        </ConvexAvailableContext.Provider>
       </ConvexProviderWithClerk>
     </ClerkProvider>
   );
