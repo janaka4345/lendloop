@@ -69,6 +69,32 @@ export const editableListingDtoValidator = v.object({
   hasActiveApprovedLoan: v.boolean(),
 });
 
+export const bookedDateRangeValidator = v.object({
+  startDate: v.string(),
+  endDate: v.string(),
+});
+
+export const listingDetailDtoValidator = v.object({
+  _id: v.id("listings"),
+  name: v.string(),
+  category: listingCategoryValidator,
+  condition: listingConditionValidator,
+  description: v.string(),
+  availability: listingAvailabilityValidator,
+  images: v.array(publicListingImageValidator),
+  lender: v.object({
+    id: v.id("users"),
+    displayName: v.string(),
+    trustedLender: v.boolean(),
+  }),
+  bookedRanges: v.array(bookedDateRangeValidator),
+  isArchived: v.boolean(),
+  archiveReason: v.optional(v.string()),
+  isOwnListing: v.boolean(),
+  pendingRequestCount: v.number(),
+  createdAt: v.number(),
+});
+
 export function toPublicListingDto(listing: Doc<"listings">, images: Array<{ url: string }>) {
   return {
     _id: listing._id,
@@ -143,5 +169,41 @@ export function toEditableListingDto(
     images: params.images,
     pendingRequestCount: params.pendingRequestCount,
     hasActiveApprovedLoan: params.hasActiveApprovedLoan,
+  };
+}
+
+export function toListingDetailDto(
+  listing: Doc<"listings">,
+  params: {
+    availability: ListingAvailability;
+    images: Array<{ url: string }>;
+    lender: Doc<"users"> | null;
+    bookedRanges: Array<{ startDate: string; endDate: string }>;
+    isOwnListing: boolean;
+    pendingRequestCount: number;
+  },
+) {
+  const isArchived = listing.archivedAt !== undefined;
+  return {
+    _id: listing._id,
+    name: listing.name,
+    category: listing.category,
+    condition: listing.condition,
+    description: listing.description,
+    availability: params.availability,
+    images: params.images,
+    lender: {
+      id: listing.lenderId,
+      displayName: params.lender?.displayName ?? "Deleted User",
+      trustedLender: params.lender?.trustedLender ?? false,
+    },
+    bookedRanges: params.bookedRanges,
+    isArchived,
+    ...(isArchived && listing.archiveReason !== undefined
+      ? { archiveReason: listing.archiveReason }
+      : {}),
+    isOwnListing: params.isOwnListing,
+    pendingRequestCount: params.pendingRequestCount,
+    createdAt: listing.createdAt,
   };
 }
