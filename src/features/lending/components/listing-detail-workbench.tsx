@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "convex/react";
+import { ConvexError } from "convex/values";
 import {
   AlertTriangle,
   Award,
@@ -10,6 +11,7 @@ import {
   Inbox,
   Pencil,
   SearchX,
+  ShieldAlert,
   User as UserIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -19,6 +21,7 @@ import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+import type { AppErrorData } from "../../../../convex/lib/errors";
 import { useHasConvexProvider, useSyncedCurrentUser } from "@/components/providers/app-providers";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -38,29 +41,74 @@ import { CATEGORY_LABELS, CONDITION_LABELS } from "@/features/listings/schema";
 import { ListingHeroGallery } from "./listing-hero-gallery";
 import { UtcRangeCalendar } from "./utc-range-calendar";
 
-class ListingDetailErrorBoundary extends Component<{ children: ReactNode }, { error: unknown }> {
+class ListingDetailErrorBoundary extends Component<
+  { listingId: string; children: ReactNode },
+  { error: unknown }
+> {
   state = { error: null as unknown };
 
   static getDerivedStateFromError(error: unknown) {
     return { error };
   }
 
+  componentDidUpdate(prevProps: { listingId: string; children: ReactNode }) {
+    if (this.state.error && prevProps.listingId !== this.props.listingId) {
+      this.setState({ error: null });
+    }
+  }
+
+  private handleRetry = () => {
+    this.setState({ error: null });
+  };
+
   render() {
     if (!this.state.error) {
       return this.props.children;
     }
 
+    let code: AppErrorData["code"] | null = null;
+    let message: string | null = null;
+    if (this.state.error instanceof ConvexError) {
+      const data = this.state.error.data as Partial<AppErrorData> | undefined;
+      if (data?.code) code = data.code;
+      if (data?.message) message = data.message;
+    }
+
+    const isNotFound = code === "NOT_FOUND";
+    const isForbidden = code === "FORBIDDEN";
+    const isUnauthenticated = code === "UNAUTHENTICATED";
+    const isRetryable = !isNotFound && !isForbidden;
+
+    const Icon = isNotFound ? SearchX : isForbidden ? ShieldAlert : AlertTriangle;
+    const title = isNotFound
+      ? "Listing not found"
+      : isForbidden
+        ? "Permission denied"
+        : isUnauthenticated
+          ? "Authentication required"
+          : "Unable to load Listing";
+    const description = isNotFound
+      ? "This Listing may have been removed or the link may be invalid."
+      : isForbidden
+        ? (message ?? "You do not have permission to view this Listing.")
+        : isUnauthenticated
+          ? (message ?? "Your session is not ready yet. Please try again.")
+          : (message ?? "Something went wrong while loading this Listing. Please try again.");
+
     return (
       <div className="border-border bg-card mx-auto max-w-lg rounded-xl border p-8 text-center">
         <div className="bg-muted mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full">
-          <SearchX className="text-muted-foreground h-6 w-6" aria-hidden="true" />
+          <Icon className="text-muted-foreground h-6 w-6" aria-hidden="true" />
         </div>
-        <h1 className="text-xl font-semibold tracking-tight">Listing not found</h1>
-        <p className="text-muted-foreground mt-2 text-sm">
-          This Listing may have been removed or the link may be invalid.
-        </p>
-        <div className="mt-6">
-          <Button asChild>
+        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+        <p className="text-muted-foreground mt-2 text-sm">{description}</p>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          {isRetryable ? (
+            <Button type="button" onClick={this.handleRetry}>
+              Try again
+            </Button>
+          ) : null}
+          <Button asChild variant={isRetryable ? "outline" : "default"}>
             <Link href="/listings">Back to All Tools</Link>
           </Button>
         </div>
@@ -414,7 +462,7 @@ export function ListingDetailWorkbench({ listingId }: { listingId: string }) {
   }
 
   return (
-    <ListingDetailErrorBoundary>
+    <ListingDetailErrorBoundary key={listingId} listingId={listingId}>
       <LiveListingDetailContent listingId={listingId as Id<"listings">} />
     </ListingDetailErrorBoundary>
   );
