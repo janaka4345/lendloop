@@ -95,6 +95,26 @@ export const listingDetailDtoValidator = v.object({
   createdAt: v.number(),
 });
 
+export const adminListingDtoValidator = v.object({
+  _id: v.id("listings"),
+  name: v.string(),
+  category: listingCategoryValidator,
+  condition: listingConditionValidator,
+  availability: listingAvailabilityValidator,
+  isArchived: v.boolean(),
+  archivedAt: v.optional(v.number()),
+  archiveReason: v.optional(v.string()),
+  imageCount: v.number(),
+  activeApprovedLoanCount: v.number(),
+  pendingRequestCount: v.number(),
+  lender: v.object({
+    id: v.id("users"),
+    displayName: v.string(),
+    trustedLender: v.boolean(),
+  }),
+  createdAt: v.number(),
+});
+
 export function toPublicListingDto(listing: Doc<"listings">, images: Array<{ url: string }>) {
   return {
     _id: listing._id,
@@ -206,6 +226,39 @@ export function toListingDetailDto(
     ...(params.pendingRequestCount !== undefined
       ? { pendingRequestCount: params.pendingRequestCount }
       : {}),
+    createdAt: listing.createdAt,
+  };
+}
+
+export function toAdminListingDto(
+  listing: Doc<"listings">,
+  params: {
+    availability: ListingAvailability;
+    lender: Doc<"users"> | null;
+    activeApprovedLoanCount: number;
+    pendingRequestCount: number;
+  },
+) {
+  const isArchived = listing.archivedAt !== undefined;
+  return {
+    _id: listing._id,
+    name: listing.name,
+    category: listing.category,
+    condition: listing.condition,
+    availability: params.availability,
+    isArchived,
+    ...(listing.archivedAt !== undefined ? { archivedAt: listing.archivedAt } : {}),
+    ...(isArchived && listing.archiveReason !== undefined
+      ? { archiveReason: listing.archiveReason }
+      : {}),
+    imageCount: (listing.imageIds ?? []).length,
+    activeApprovedLoanCount: params.activeApprovedLoanCount,
+    pendingRequestCount: params.pendingRequestCount,
+    lender: {
+      id: listing.lenderId,
+      displayName: params.lender?.displayName ?? "Deleted User",
+      trustedLender: params.lender?.trustedLender ?? false,
+    },
     createdAt: listing.createdAt,
   };
 }

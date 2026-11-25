@@ -4,15 +4,17 @@ import { query, type QueryCtx } from "../_generated/server";
 import { todayUtcDate } from "../../src/domain/dates";
 import { deriveListingAvailability } from "../../src/domain/loan";
 import { DOMAIN_LIMITS } from "../../src/domain/types";
-import { requireCurrentUser, requireListingLender } from "../lib/authz";
+import { requireAdmin, requireCurrentUser, requireListingLender } from "../lib/authz";
 import { createAppError } from "../lib/errors";
 import { listingCategoryValidator } from "../schema";
 import {
+  adminListingDtoValidator,
   catalogListingDtoValidator,
   editableListingDtoValidator,
   listingDetailDtoValidator,
   myListingDtoValidator,
   publicListingDtoValidator,
+  toAdminListingDto,
   toCatalogListingDto,
   toEditableListingDto,
   toListingDetailDto,
@@ -44,6 +46,7 @@ async function getListingLoanSnapshot(ctx: QueryCtx, listingId: Id<"listings">, 
 
   return {
     availability: deriveListingAvailability(approvedLoans, todayUtc),
+    activeApprovedLoanCount: approvedLoans.length,
     hasActiveApprovedLoan: approvedLoans.length > 0,
     pendingRequestCount: pendingLoans.length,
   };
@@ -364,5 +367,74 @@ export const getListingDetail = query({
       isOwnListing,
       ...(pendingLoans !== null ? { pendingRequestCount: pendingLoans.length } : {}),
     });
+  },
+});
+
+/**
+ * Admin-only paginated Listings moderation query (`/admin` → Listings tab).
+ * Lists active, archived, or all Listings with Lender summary and Loan counts.
+ */
+export const listAllListingsForAdmin = query({
+  args: {
+    status: v.optional(v.union(v.literal("all"), v.literal("active"), v.literal("archived"))),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    items: v.array(adminListingDtoValidator),
+    continueCursor: v.string(),
+    isDone: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    const numItems = clampPageSize(args.limit);
+    const statusFilter = args.status ?? "all";
+
+    const pageResult =
+      statusFilter === "active"
+        ? await ctx.db
+            .query("listings")
+            .withIndex("by_archived_category", (q) => q.eq("archivedAt", undefined))
+            .order("desc")
+            .paginate({ numItems, cursor: args.cursor ?? null })
+        : statusFilter === "archived"
+          ? await ctx.db
+              .query("listings")
+              .withIndex("by_archived_category", (q) => q.gt("archivedAt", 0))
+              .order("desc")
+              .paginate({ numItems, cursor: args.cursor ?? null })
+          : await ctx.db
+              .query("listings")
+              .order("desc")
+              .paginate({ numItems, cursor: args.cursor ?? null });
+
+    const todayUtc = todayUtcDate();
+    const lenderCache = new Map<Id<"users">, Awaited<ReturnType<typeof ctx.db.get<"users">>>>();
+    const items = [];
+
+    for (const listing of pageResult.page) {
+      let lender = lenderCache.get(listing.lenderId);
+      if (lender === undefined) {
+        lender = await ctx.db.get(listing.lenderId);
+        lenderCache.set(listing.lenderId, lender);
+      }
+
+      const snapshot = await getListingLoanSnapshot(ctx, listing._id, todayUtc);
+      items.push(
+        toAdminListingDto(listing, {
+          availability: snapshot.availability,
+          lender,
+          activeApprovedLoanCount: snapshot.activeApprovedLoanCount,
+          pendingRequestCount: snapshot.pendingRequestCount,
+        }),
+      );
+    }
+
+    return {
+      items,
+      continueCursor: pageResult.continueCursor,
+      isDone: pageResult.isDone,
+    };
   },
 });

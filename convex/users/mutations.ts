@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import { internalMutation, mutation } from "../_generated/server";
 import { recordAuditLog } from "../audit/seam";
-import { requireIdentity } from "../lib/authz";
+import { requireAdmin, requireIdentity } from "../lib/authz";
 import { createAppError } from "../lib/errors";
 import { enforceRateLimit } from "../lib/rateLimit";
 import { userRoleValidator } from "../schema";
@@ -163,6 +163,55 @@ export const setUserRole = internalMutation({
     }
 
     return { _id: args.userId, role: args.role };
+  },
+});
+
+/**
+ * Admin-only mutation to grant or revoke the display-only `Trusted Lender` badge.
+ * Writes an atomic `user.trusted_lender_toggled` Audit Log entry with zero PII.
+ */
+export const setTrustedLender = mutation({
+  args: {
+    userId: v.id("users"),
+    trustedLender: v.boolean(),
+  },
+  returns: v.object({
+    _id: v.id("users"),
+    trustedLender: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    const admin = await requireAdmin(ctx);
+    await enforceRateLimit(ctx, "adminWrite", admin._id);
+
+    const user = await ctx.db.get(args.userId);
+    if (!user) {
+      throw createAppError("NOT_FOUND", "User not found.");
+    }
+    if (user.deletedAt !== undefined) {
+      throw createAppError("CONFLICT", "Cannot update Trusted Lender status for a deleted User.");
+    }
+
+    const previousTrustedLender = user.trustedLender;
+    if (previousTrustedLender !== args.trustedLender) {
+      await ctx.db.patch(args.userId, {
+        trustedLender: args.trustedLender,
+        updatedAt: Date.now(),
+      });
+
+      await recordAuditLog(ctx, {
+        actorId: admin._id,
+        actorRole: admin.role,
+        action: "user.trusted_lender_toggled",
+        targetType: "user",
+        targetId: args.userId,
+        metadata: {
+          previousTrustedLender,
+          nextTrustedLender: args.trustedLender,
+        },
+      });
+    }
+
+    return { _id: args.userId, trustedLender: args.trustedLender };
   },
 });
 

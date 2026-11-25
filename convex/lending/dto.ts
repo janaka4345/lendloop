@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
+import { redactText } from "../../src/domain/redaction";
 import {
   automationActivityStatusValidator,
   automationEventTypeValidator,
@@ -60,6 +61,23 @@ export const loanSectionsDtoValidator = v.object({
   history: v.array(loanCardDtoValidator),
 });
 
+export const adminLoanDtoValidator = v.object({
+  _id: v.id("loans"),
+  status: loanStatusValidator,
+  isOverdue: v.boolean(),
+  startDate: v.string(),
+  endDate: v.string(),
+  note: v.optional(v.string()),
+  decisionReason: v.optional(v.string()),
+  returnedAt: v.optional(v.number()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+  listing: loanListingSummaryDtoValidator,
+  lender: loanCounterpartyDtoValidator,
+  borrower: loanCounterpartyDtoValidator,
+  automationActivities: v.array(loanAutomationActivityDtoValidator),
+});
+
 export function toLoanAutomationActivityDto(
   activity: Doc<"automationActivities">,
   includeLastError: boolean,
@@ -71,7 +89,7 @@ export function toLoanAutomationActivityDto(
     attemptCount: activity.attemptCount,
     recipientRole: activity.recipientRole,
     ...(includeLastError && activity.lastError !== undefined
-      ? { lastError: activity.lastError }
+      ? { lastError: redactText(activity.lastError) }
       : {}),
     createdAt: activity.createdAt,
     ...(activity.completedAt !== undefined ? { completedAt: activity.completedAt } : {}),
@@ -124,6 +142,49 @@ export function toLoanCardDto(
     conflictingPendingCount: params.conflictingPendingCount,
     automationActivities: params.automationActivities.map((activity) =>
       toLoanAutomationActivityDto(activity, params.includeLastError),
+    ),
+  };
+}
+
+export function toAdminLoanDto(
+  loan: Doc<"loans">,
+  params: {
+    isOverdue: boolean;
+    listing: Doc<"listings"> | null;
+    lender: Doc<"users"> | null;
+    borrower: Doc<"users"> | null;
+    automationActivities: ReadonlyArray<Doc<"automationActivities">>;
+  },
+) {
+  return {
+    _id: loan._id,
+    status: loan.status,
+    isOverdue: params.isOverdue,
+    startDate: loan.startDate,
+    endDate: loan.endDate,
+    ...(loan.note !== undefined ? { note: loan.note } : {}),
+    ...(loan.decisionReason !== undefined ? { decisionReason: loan.decisionReason } : {}),
+    ...(loan.returnedAt !== undefined ? { returnedAt: loan.returnedAt } : {}),
+    createdAt: loan.createdAt,
+    updatedAt: loan.updatedAt,
+    listing: {
+      id: loan.listingId,
+      name: params.listing?.name ?? "Removed Listing",
+      category: params.listing?.category ?? "other",
+      isArchived: params.listing === null || params.listing.archivedAt !== undefined,
+    },
+    lender: {
+      id: loan.lenderId,
+      displayName: params.lender?.displayName ?? "Deleted User",
+      trustedLender: params.lender?.trustedLender ?? false,
+    },
+    borrower: {
+      id: loan.borrowerId,
+      displayName: params.borrower?.displayName ?? "Deleted User",
+      trustedLender: params.borrower?.trustedLender ?? false,
+    },
+    automationActivities: params.automationActivities.map((activity) =>
+      toLoanAutomationActivityDto(activity, true),
     ),
   };
 }
