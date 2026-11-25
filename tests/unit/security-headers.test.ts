@@ -45,8 +45,34 @@ describe("OWASP security headers and runtime-derived CSP", () => {
     expect(csp).toContain("wss://happy-otter-123.convex.cloud");
     expect(csp).toContain("https://o12345.ingest.us.sentry.io");
     expect(csp).toMatch(
-      /img-src [^;]*'self'[^;]*blob:[^;]*data:[^;]*https:\/\/happy-otter-123\.convex\.cloud/,
+      /script-src [^;]*https:\/\/clerk\.lendloop\.dev[^;]*https:\/\/\*\.protect\.clerk\.com[^;]*https:\/\/challenges\.cloudflare\.com/,
     );
+    expect(csp).toMatch(
+      /connect-src [^;]*https:\/\/clerk\.lendloop\.dev[^;]*https:\/\/\*\.protect\.clerk\.com:\*/,
+    );
+    expect(csp).toMatch(
+      /img-src [^;]*'self'[^;]*blob:[^;]*data:[^;]*https:\/\/happy-otter-123\.convex\.cloud[^;]*https:\/\/clerk\.lendloop\.dev[^;]*https:\/\/img\.clerk\.com/,
+    );
+    expect(csp).toMatch(
+      /frame-src [^;]*'self'[^;]*https:\/\/challenges\.cloudflare\.com[^;]*https:\/\/\*\.protect\.clerk\.com/,
+    );
+  });
+
+  it("omits Clerk-specific CSP origins when Clerk is not configured", () => {
+    const headers = buildSecurityHeaders(
+      {
+        NODE_ENV: "production",
+        APP_URL: "https://app.lendloop.dev",
+        CONVEX_URL: "https://happy-otter-123.convex.cloud",
+      },
+      { isHttpsRequest: true },
+    );
+
+    const csp = headers["Content-Security-Policy"];
+    expect(csp).not.toContain("protect.clerk.com");
+    expect(csp).not.toContain("img.clerk.com");
+    expect(csp).not.toContain("challenges.cloudflare.com");
+    expect(csp).toContain("frame-src 'self'");
   });
 
   it("omits Strict-Transport-Security and Sentry origin in local HTTP environments", () => {
