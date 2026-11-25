@@ -10,10 +10,12 @@ import { listingCategoryValidator } from "../schema";
 import {
   catalogListingDtoValidator,
   editableListingDtoValidator,
+  listingDetailDtoValidator,
   myListingDtoValidator,
   publicListingDtoValidator,
   toCatalogListingDto,
   toEditableListingDto,
+  toListingDetailDto,
   toMyListingDto,
   toPublicListingDto,
 } from "./dto";
@@ -278,6 +280,89 @@ export const getListingForEdit = query({
       images,
       pendingRequestCount: snapshot.pendingRequestCount,
       hasActiveApprovedLoan: snapshot.hasActiveApprovedLoan,
+    });
+  },
+});
+
+/**
+ * Authenticated Listing detail query (`/listings/[id]`).
+ * - Active Listings are visible to all signed-in Users.
+ * - Archived Listings are visible read-only ONLY to the Lender, Borrowers with a Loan on the Listing,
+ *   or an Admin; unrelated Users receive `NOT_FOUND`.
+ * - Upcoming `approved` booked date ranges omit all Borrower identities.
+ */
+export const getListingDetail = query({
+  args: {
+    listingId: v.id("listings"),
+  },
+  returns: listingDetailDtoValidator,
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const listing = await ctx.db.get(args.listingId);
+
+    if (!listing) {
+      throw createAppError("NOT_FOUND", "Listing not found.");
+    }
+
+    const isOwnListing = listing.lenderId === user._id;
+    const isAdmin = user.role === "admin";
+
+    if (listing.archivedAt !== undefined && !isOwnListing && !isAdmin) {
+      const statuses = ["approved", "pending", "returned", "declined", "cancelled"] as const;
+      let isParticipant = false;
+
+      for (const status of statuses) {
+        const borrowerLoans = await ctx.db
+          .query("loans")
+          .withIndex("by_borrower_status", (q) => q.eq("borrowerId", user._id).eq("status", status))
+          .take(LOAN_LOOKUP_BOUND);
+        if (borrowerLoans.some((loan) => loan.listingId === listing._id)) {
+          isParticipant = true;
+          break;
+        }
+      }
+
+      if (!isParticipant) {
+        throw createAppError("NOT_FOUND", "Listing not found.");
+      }
+    }
+
+    const todayUtc = todayUtcDate();
+    const [approvedLoans, pendingLoans, lender, images] = await Promise.all([
+      ctx.db
+        .query("loans")
+        .withIndex("by_listing_status", (q) =>
+          q.eq("listingId", listing._id).eq("status", "approved"),
+        )
+        .take(LOAN_LOOKUP_BOUND),
+      isOwnListing
+        ? ctx.db
+            .query("loans")
+            .withIndex("by_listing_status", (q) =>
+              q.eq("listingId", listing._id).eq("status", "pending"),
+            )
+            .take(LOAN_LOOKUP_BOUND)
+        : Promise.resolve(null),
+      ctx.db.get(listing.lenderId),
+      resolveListingImageUrls(ctx, listing.imageIds),
+    ]);
+
+    const availability = deriveListingAvailability(approvedLoans, todayUtc);
+    const bookedRanges = approvedLoans
+      .filter((loan) => loan.endDate >= todayUtc)
+      .sort((a, b) => a.startDate.localeCompare(b.startDate))
+      .map((loan) => ({
+        startDate: loan.startDate,
+        endDate: loan.endDate,
+      }));
+
+    return toListingDetailDto(listing, {
+      availability,
+      images,
+      lender,
+      bookedRanges,
+      isOwnListing,
+      ...(pendingLoans !== null ? { pendingRequestCount: pendingLoans.length } : {}),
     });
   },
 });

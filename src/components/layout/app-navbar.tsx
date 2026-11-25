@@ -18,6 +18,24 @@ const BASE_NAV_LINKS = [
   { href: "/incoming-requests", label: "Incoming Requests" },
 ] as const;
 
+function IncomingPendingBadge() {
+  const currentUser = useQuery(api.users.queries.getCurrentUser, {});
+  const result = useQuery(api.lending.queries.getIncomingPendingCount, currentUser ? {} : "skip");
+  const count = result?.count ?? 0;
+  if (count <= 0) {
+    return null;
+  }
+
+  return (
+    <span
+      aria-label={`${count} pending incoming requests`}
+      className="bg-primary text-primary-foreground ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] leading-none font-semibold"
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 function AdminNavLink({
   pathname,
   onNavigate,
@@ -78,13 +96,16 @@ export function AppNavbar() {
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                    "inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
                     isActive
                       ? "bg-secondary text-foreground"
                       : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
                   )}
                 >
                   {item.label}
+                  {hasConvex && item.href === "/incoming-requests" ? (
+                    <IncomingPendingBadge />
+                  ) : null}
                 </Link>
               );
             })}
@@ -129,13 +150,16 @@ export function AppNavbar() {
                   href={item.href}
                   onClick={() => setMobileOpen(false)}
                   className={cn(
-                    "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    "inline-flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors",
                     isActive
                       ? "bg-secondary text-foreground"
                       : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
                   )}
                 >
-                  {item.label}
+                  <span>{item.label}</span>
+                  {hasConvex && item.href === "/incoming-requests" ? (
+                    <IncomingPendingBadge />
+                  ) : null}
                 </Link>
               );
             })}

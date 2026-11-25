@@ -1,7 +1,9 @@
 export {
+  bookedDateRangeValidator,
   catalogListingDtoValidator,
   editableListingDtoValidator,
   listingAvailabilityValidator,
+  listingDetailDtoValidator,
   myListingDtoValidator,
   publicListingDtoValidator,
 } from "./dto";
@@ -15,6 +17,7 @@ export {
   updateListing,
 } from "./mutations";
 export {
+  getListingDetail,
   getListingForEdit,
   listCatalogListings,
   listMyListings,

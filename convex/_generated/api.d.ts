@@ -10,7 +10,14 @@
 
 import type * as audit_index from "../audit/index.js";
 import type * as audit_seam from "../audit/seam.js";
+import type * as automation_index from "../automation/index.js";
+import type * as automation_seam from "../automation/seam.js";
 import type * as http from "../http.js";
+import type * as lending_dto from "../lending/dto.js";
+import type * as lending_index from "../lending/index.js";
+import type * as lending_mutations from "../lending/mutations.js";
+import type * as lending_queries from "../lending/queries.js";
+import type * as lending_seam from "../lending/seam.js";
 import type * as lib_authz from "../lib/authz.js";
 import type * as lib_authzChecks from "../lib/authzChecks.js";
 import type * as lib_errors from "../lib/errors.js";
@@ -35,7 +42,14 @@ import type {
 declare const fullApi: ApiFromModules<{
   "audit/index": typeof audit_index;
   "audit/seam": typeof audit_seam;
+  "automation/index": typeof automation_index;
+  "automation/seam": typeof automation_seam;
   http: typeof http;
+  "lending/dto": typeof lending_dto;
+  "lending/index": typeof lending_index;
+  "lending/mutations": typeof lending_mutations;
+  "lending/queries": typeof lending_queries;
+  "lending/seam": typeof lending_seam;
   "lib/authz": typeof lib_authz;
   "lib/authzChecks": typeof lib_authzChecks;
   "lib/errors": typeof lib_errors;
