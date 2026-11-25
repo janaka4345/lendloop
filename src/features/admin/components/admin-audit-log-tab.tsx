@@ -5,10 +5,10 @@ import { ScrollText } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import type { AuditAction } from "@/domain/types";
 import { AUDIT_ACTION_LABELS, AUDIT_ACTION_OPTIONS } from "@/features/admin/schema";
+import { AdminPaginationControls, useCursorPagination } from "./admin-pagination";
 
 const PAGE_SIZE = 25;
 
@@ -21,36 +21,17 @@ function formatUtcTimestamp(timestampMs: number): string {
 
 export function AdminAuditLogTab() {
   const [actionFilter, setActionFilter] = useState<AuditAction | "all">("all");
-  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
-  const currentCursor = cursorHistory[pageIndex] ?? null;
+  const pagination = useCursorPagination();
 
   const page = useQuery(api.audit.queries.listAuditLogs, {
     ...(actionFilter !== "all" ? { action: actionFilter } : {}),
-    cursor: currentCursor,
+    cursor: pagination.currentCursor,
     limit: PAGE_SIZE,
   });
 
   const handleActionChange = (nextAction: AuditAction | "all") => {
     setActionFilter(nextAction);
-    setCursorHistory([null]);
-    setPageIndex(0);
-  };
-
-  const handleNextPage = () => {
-    if (!page || page.isDone || !page.continueCursor) return;
-    const nextIndex = pageIndex + 1;
-    setCursorHistory((prev) => {
-      const updated = prev.slice(0, nextIndex);
-      updated.push(page.continueCursor);
-      return updated;
-    });
-    setPageIndex(nextIndex);
-  };
-
-  const handlePrevPage = () => {
-    if (pageIndex === 0) return;
-    setPageIndex((prev) => Math.max(0, prev - 1));
+    pagination.reset();
   };
 
   return (
@@ -171,29 +152,12 @@ export function AdminAuditLogTab() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-muted-foreground text-xs">Page {pageIndex + 1}</p>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={pageIndex === 0}
-                onClick={handlePrevPage}
-              >
-                Previous
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={page.isDone}
-                onClick={handleNextPage}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
+          <AdminPaginationControls
+            pageIndex={pagination.pageIndex}
+            isDone={page.isDone}
+            onPrev={pagination.goPrev}
+            onNext={() => pagination.goNext(page.continueCursor, page.isDone)}
+          />
         </>
       )}
     </div>

@@ -5,6 +5,7 @@ import { todayUtcDate } from "../../src/domain/dates";
 import { canTransitionLoan, findOverlappingLoans, isLoanOverdue } from "../../src/domain/loan";
 import { DOMAIN_LIMITS } from "../../src/domain/types";
 import { requireAdmin, requireCurrentUser, requireLoanParticipantOrAdmin } from "../lib/authz";
+import { clampPageSize } from "../lib/pagination";
 import { loanStatusValidator } from "../schema";
 import {
   adminLoanDtoValidator,
@@ -17,13 +18,6 @@ import {
 const STATUS_QUERY_BOUND = DOMAIN_LIMITS.MAX_PAGE_SIZE;
 const AUTOMATION_TIMELINE_LIMIT = 20;
 const PENDING_BADGE_BOUND = 100;
-
-function clampPageSize(limit?: number): number {
-  if (limit === undefined || !Number.isFinite(limit)) {
-    return DOMAIN_LIMITS.MAX_PAGE_SIZE;
-  }
-  return Math.min(Math.max(Math.floor(limit), 1), DOMAIN_LIMITS.MAX_PAGE_SIZE);
-}
 
 async function hydrateLoanCard(
   ctx: QueryCtx,

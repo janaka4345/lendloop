@@ -19,6 +19,69 @@ import {
 
 const ARCHIVE_LOAN_BATCH_SIZE = 100;
 
+async function autoDeclinePendingLoansForListing(
+  ctx: MutationCtx,
+  params: {
+    listingId: Id<"listings">;
+    decisionReason: string;
+    reasonCode: "listing_archived_by_lender" | "listing_removed_by_admin";
+    now: number;
+    emitAuditAndNotification: boolean;
+  },
+): Promise<number> {
+  let autoDeclinedCount = 0;
+
+  for (;;) {
+    const pendingBatch = await ctx.db
+      .query("loans")
+      .withIndex("by_listing_status", (q) =>
+        q.eq("listingId", params.listingId).eq("status", "pending"),
+      )
+      .take(ARCHIVE_LOAN_BATCH_SIZE);
+
+    if (pendingBatch.length === 0) {
+      break;
+    }
+
+    for (const loan of pendingBatch) {
+      await ctx.db.patch(loan._id, {
+        status: "declined",
+        decisionReason: params.decisionReason,
+        updatedAt: params.now,
+      });
+
+      if (params.emitAuditAndNotification) {
+        await recordAuditLog(ctx, {
+          actorRole: "system",
+          action: "loan.declined",
+          targetType: "loan",
+          targetId: loan._id,
+          metadata: {
+            listingId: params.listingId,
+            autoDeclined: true,
+            reasonCode: params.reasonCode,
+          },
+        });
+
+        await enqueueAutomationActivity(ctx, {
+          loanId: loan._id,
+          eventType: "loan_declined",
+          idempotencyKey: `loan_declined:${loan._id}`,
+          recipientRole: "borrower",
+        });
+      }
+
+      autoDeclinedCount += 1;
+    }
+
+    if (pendingBatch.length < ARCHIVE_LOAN_BATCH_SIZE) {
+      break;
+    }
+  }
+
+  return autoDeclinedCount;
+}
+
 function validateListingTextFields(name: string, description: string) {
   const trimmedName = name.trim();
   const trimmedDescription = description.trim();
@@ -390,33 +453,13 @@ export const archiveListing = mutation({
     }
 
     const now = Date.now();
-    let autoDeclinedCount = 0;
-
-    for (;;) {
-      const pendingBatch = await ctx.db
-        .query("loans")
-        .withIndex("by_listing_status", (q) =>
-          q.eq("listingId", listing._id).eq("status", "pending"),
-        )
-        .take(ARCHIVE_LOAN_BATCH_SIZE);
-
-      if (pendingBatch.length === 0) {
-        break;
-      }
-
-      for (const loan of pendingBatch) {
-        await ctx.db.patch(loan._id, {
-          status: "declined",
-          decisionReason: "Listing archived",
-          updatedAt: now,
-        });
-        autoDeclinedCount += 1;
-      }
-
-      if (pendingBatch.length < ARCHIVE_LOAN_BATCH_SIZE) {
-        break;
-      }
-    }
+    const autoDeclinedCount = await autoDeclinePendingLoansForListing(ctx, {
+      listingId: listing._id,
+      decisionReason: "Listing archived",
+      reasonCode: "listing_archived_by_lender",
+      now,
+      emitAuditAndNotification: false,
+    });
 
     const deletedImageCount = await deleteListingImageBlobs(ctx, listing.imageIds ?? []);
 
@@ -504,53 +547,13 @@ export const adminRemoveListing = mutation({
     const activeApprovedLoanCount = activeApprovedLoans.length;
 
     const now = Date.now();
-    let autoDeclinedCount = 0;
-
-    for (;;) {
-      const pendingBatch = await ctx.db
-        .query("loans")
-        .withIndex("by_listing_status", (q) =>
-          q.eq("listingId", listing._id).eq("status", "pending"),
-        )
-        .take(ARCHIVE_LOAN_BATCH_SIZE);
-
-      if (pendingBatch.length === 0) {
-        break;
-      }
-
-      for (const loan of pendingBatch) {
-        await ctx.db.patch(loan._id, {
-          status: "declined",
-          decisionReason: "Listing removed by Admin",
-          updatedAt: now,
-        });
-
-        await recordAuditLog(ctx, {
-          actorRole: "system",
-          action: "loan.declined",
-          targetType: "loan",
-          targetId: loan._id,
-          metadata: {
-            listingId: listing._id,
-            autoDeclined: true,
-            reasonCode: "listing_removed_by_admin",
-          },
-        });
-
-        await enqueueAutomationActivity(ctx, {
-          loanId: loan._id,
-          eventType: "loan_declined",
-          idempotencyKey: `loan_declined:${loan._id}`,
-          recipientRole: "borrower",
-        });
-
-        autoDeclinedCount += 1;
-      }
-
-      if (pendingBatch.length < ARCHIVE_LOAN_BATCH_SIZE) {
-        break;
-      }
-    }
+    const autoDeclinedCount = await autoDeclinePendingLoansForListing(ctx, {
+      listingId: listing._id,
+      decisionReason: "Listing removed by Admin",
+      reasonCode: "listing_removed_by_admin",
+      now,
+      emitAuditAndNotification: true,
+    });
 
     const deletedImageCount = await deleteListingImageBlobs(ctx, listing.imageIds ?? []);
 

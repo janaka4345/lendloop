@@ -489,18 +489,18 @@ describe("Admin panel — Audit Log tab (listAuditLogs)", () => {
       name: "Admin Five",
       role: "admin",
     });
-    const member = await seedUser(t, {
-      subject: "clerk_member_5",
-      email: "member5@example.com",
-      name: "Member Sam",
+    const neighbor = await seedUser(t, {
+      subject: "clerk_neighbor_5",
+      email: "neighbor5@example.com",
+      name: "Sam Neighbor",
     });
 
     // Generate multiple audit log actions
     await admin.asUser.mutation(api.users.mutations.setTrustedLender, {
-      userId: member.userId,
+      userId: neighbor.userId,
       trustedLender: true,
     });
-    await member.asUser.mutation(api.listings.mutations.createListing, {
+    await neighbor.asUser.mutation(api.listings.mutations.createListing, {
       name: "Camping Lantern",
       category: "camping",
       condition: "new",
@@ -509,7 +509,7 @@ describe("Admin panel — Audit Log tab (listAuditLogs)", () => {
 
     // Negative RBAC checks
     await expectAppError(t.query(api.audit.queries.listAuditLogs, {}), "UNAUTHENTICATED");
-    await expectAppError(member.asUser.query(api.audit.queries.listAuditLogs, {}), "FORBIDDEN");
+    await expectAppError(neighbor.asUser.query(api.audit.queries.listAuditLogs, {}), "FORBIDDEN");
 
     // Admin paginated query across all actions (setUserRole + setTrustedLender + createListing = 3)
     const page1 = await admin.asUser.query(api.audit.queries.listAuditLogs, { limit: 2 });

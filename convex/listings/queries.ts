@@ -3,9 +3,9 @@ import type { Id } from "../_generated/dataModel";
 import { query, type QueryCtx } from "../_generated/server";
 import { todayUtcDate } from "../../src/domain/dates";
 import { deriveListingAvailability } from "../../src/domain/loan";
-import { DOMAIN_LIMITS } from "../../src/domain/types";
 import { requireAdmin, requireCurrentUser, requireListingLender } from "../lib/authz";
 import { createAppError } from "../lib/errors";
+import { clampPageSize } from "../lib/pagination";
 import { listingCategoryValidator } from "../schema";
 import {
   adminListingDtoValidator,
@@ -24,13 +24,6 @@ import {
 import { resolveEditableListingImages, resolveListingImageUrls } from "./images";
 
 const LOAN_LOOKUP_BOUND = 100;
-
-function clampPageSize(limit?: number): number {
-  if (limit === undefined || !Number.isFinite(limit)) {
-    return DOMAIN_LIMITS.MAX_PAGE_SIZE;
-  }
-  return Math.min(Math.max(Math.floor(limit), 1), DOMAIN_LIMITS.MAX_PAGE_SIZE);
-}
 
 async function getListingLoanSnapshot(ctx: QueryCtx, listingId: Id<"listings">, todayUtc: string) {
   const [approvedLoans, pendingLoans] = await Promise.all([

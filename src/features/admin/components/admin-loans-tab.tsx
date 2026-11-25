@@ -13,34 +13,28 @@ import { AutomationActivityFooter } from "@/features/lending/components/automati
 import { LOAN_STATUS_LABELS } from "@/features/lending/schema";
 import { CATEGORY_LABELS } from "@/features/listings/schema";
 import { cn } from "@/lib/utils";
+import { AdminPaginationControls, useCursorPagination } from "./admin-pagination";
 
 const PAGE_SIZE = 25;
 
 export function AdminLoansTab() {
   const [statusFilter, setStatusFilter] = useState<LoanStatus | "all">("all");
   const [overdueOnly, setOverdueOnly] = useState(false);
-  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
-  const currentCursor = cursorHistory[pageIndex] ?? null;
+  const pagination = useCursorPagination();
 
   const page = useQuery(api.lending.queries.listAllLoansForAdmin, {
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
     ...(overdueOnly ? { overdueOnly: true } : {}),
-    cursor: currentCursor,
+    cursor: pagination.currentCursor,
     limit: PAGE_SIZE,
   });
 
-  const resetPagination = () => {
-    setCursorHistory([null]);
-    setPageIndex(0);
-  };
-
   const handleStatusChange = (nextStatus: LoanStatus | "all") => {
     setStatusFilter(nextStatus);
-    if (nextStatus !== "all" && nextStatus !== "approved") {
+    if (nextStatus === "all" || nextStatus !== "approved") {
       setOverdueOnly(false);
     }
-    resetPagination();
+    pagination.reset();
   };
 
   const handleToggleOverdue = () => {
@@ -51,23 +45,7 @@ export function AdminLoansTab() {
       }
       return next;
     });
-    resetPagination();
-  };
-
-  const handleNextPage = () => {
-    if (!page || page.isDone || !page.continueCursor) return;
-    const nextIndex = pageIndex + 1;
-    setCursorHistory((prev) => {
-      const updated = prev.slice(0, nextIndex);
-      updated.push(page.continueCursor);
-      return updated;
-    });
-    setPageIndex(nextIndex);
-  };
-
-  const handlePrevPage = () => {
-    if (pageIndex === 0) return;
-    setPageIndex((prev) => Math.max(0, prev - 1));
+    pagination.reset();
   };
 
   return (
@@ -245,29 +223,12 @@ export function AdminLoansTab() {
             })}
           </div>
 
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-muted-foreground text-xs">Page {pageIndex + 1}</p>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={pageIndex === 0}
-                onClick={handlePrevPage}
-              >
-                Previous
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={page.isDone}
-                onClick={handleNextPage}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
+          <AdminPaginationControls
+            pageIndex={pagination.pageIndex}
+            isDone={page.isDone}
+            onPrev={pagination.goPrev}
+            onNext={() => pagination.goNext(page.continueCursor, page.isDone)}
+          />
         </>
       )}
     </div>

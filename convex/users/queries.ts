@@ -1,8 +1,8 @@
 import { v } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import { query } from "../_generated/server";
-import { DOMAIN_LIMITS } from "../../src/domain/types";
 import { requireAdmin } from "../lib/authz";
+import { clampPageSize } from "../lib/pagination";
 import { userRoleValidator } from "../schema";
 import { currentUserDtoValidator, toCurrentUserDto } from "./mutations";
 
@@ -26,13 +26,6 @@ function toAdminUserDto(user: Doc<"users">) {
     isDeleted: user.deletedAt !== undefined,
     createdAt: user.createdAt,
   };
-}
-
-function clampPageSize(limit?: number): number {
-  if (limit === undefined || !Number.isFinite(limit)) {
-    return DOMAIN_LIMITS.MAX_PAGE_SIZE;
-  }
-  return Math.min(Math.max(Math.floor(limit), 1), DOMAIN_LIMITS.MAX_PAGE_SIZE);
 }
 
 export const getCurrentUser = query({

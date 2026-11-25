@@ -2,8 +2,8 @@ import { v } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import { query } from "../_generated/server";
 import { sanitizeAuditMetadata } from "../../src/domain/redaction";
-import { DOMAIN_LIMITS } from "../../src/domain/types";
 import { requireAdmin } from "../lib/authz";
+import { clampPageSize } from "../lib/pagination";
 import {
   auditActionValidator,
   auditActorRoleValidator,
@@ -34,13 +34,6 @@ function toAdminAuditLogDto(log: Doc<"auditLogs">) {
     ...(sanitized !== undefined ? { metadata: sanitized } : {}),
     createdAt: log.createdAt,
   };
-}
-
-function clampPageSize(limit?: number): number {
-  if (limit === undefined || !Number.isFinite(limit)) {
-    return DOMAIN_LIMITS.MAX_PAGE_SIZE;
-  }
-  return Math.min(Math.max(Math.floor(limit), 1), DOMAIN_LIMITS.MAX_PAGE_SIZE);
 }
 
 /**

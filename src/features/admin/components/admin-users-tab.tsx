@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/dialog";
 import type { UserRole } from "@/domain/types";
 import { extractAppErrorMessage } from "@/features/lending/schema";
+import { AdminPaginationControls, useCursorPagination } from "./admin-pagination";
 
 interface AdminUserItem {
   _id: Id<"users">;
@@ -26,12 +27,10 @@ interface AdminUserItem {
 const PAGE_SIZE = 25;
 
 export function AdminUsersTab() {
-  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
-  const currentCursor = cursorHistory[pageIndex] ?? null;
+  const pagination = useCursorPagination();
 
   const page = useQuery(api.users.queries.listUsersForAdmin, {
-    cursor: currentCursor,
+    cursor: pagination.currentCursor,
     limit: PAGE_SIZE,
   });
 
@@ -67,22 +66,6 @@ export function AdminUsersTab() {
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const handleNextPage = () => {
-    if (!page || page.isDone || !page.continueCursor) return;
-    const nextIndex = pageIndex + 1;
-    setCursorHistory((prev) => {
-      const updated = prev.slice(0, nextIndex);
-      updated.push(page.continueCursor);
-      return updated;
-    });
-    setPageIndex(nextIndex);
-  };
-
-  const handlePrevPage = () => {
-    if (pageIndex === 0) return;
-    setPageIndex((prev) => Math.max(0, prev - 1));
   };
 
   if (page === undefined) {
@@ -179,29 +162,12 @@ export function AdminUsersTab() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-muted-foreground text-xs">Page {pageIndex + 1}</p>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={pageIndex === 0}
-            onClick={handlePrevPage}
-          >
-            Previous
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={page.isDone}
-            onClick={handleNextPage}
-          >
-            Next
-          </Button>
-        </div>
-      </div>
+      <AdminPaginationControls
+        pageIndex={pagination.pageIndex}
+        isDone={page.isDone}
+        onPrev={pagination.goPrev}
+        onNext={() => pagination.goNext(page.continueCursor, page.isDone)}
+      />
 
       <ModalDialog
         open={targetUser !== null}

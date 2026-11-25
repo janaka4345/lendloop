@@ -1,9 +1,11 @@
 "use client";
 
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "convex/react";
 import { AlertTriangle, Award, Package, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -19,9 +21,13 @@ import {
   type ListingCategory,
   type ListingCondition,
 } from "@/domain/types";
-import { adminRemoveListingSchema } from "@/features/admin/schema";
+import {
+  adminRemoveListingSchema,
+  type AdminRemoveListingFormValues,
+} from "@/features/admin/schema";
 import { extractAppErrorMessage } from "@/features/lending/schema";
 import { CATEGORY_LABELS, CONDITION_LABELS } from "@/features/listings/schema";
+import { AdminPaginationControls, useCursorPagination } from "./admin-pagination";
 
 type ListingStatusFilter = "all" | "active" | "archived";
 
@@ -55,49 +61,57 @@ const PAGE_SIZE = 25;
 
 export function AdminListingsTab() {
   const [statusFilter, setStatusFilter] = useState<ListingStatusFilter>("all");
-  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
-  const currentCursor = cursorHistory[pageIndex] ?? null;
+  const pagination = useCursorPagination();
 
   const page = useQuery(api.listings.queries.listAllListingsForAdmin, {
     status: statusFilter,
-    cursor: currentCursor,
+    cursor: pagination.currentCursor,
     limit: PAGE_SIZE,
   });
 
   const adminRemoveListing = useMutation(api.listings.mutations.adminRemoveListing);
   const [targetListing, setTargetListing] = useState<AdminListingItem | null>(null);
-  const [archiveReason, setArchiveReason] = useState("");
-  const [dialogError, setDialogError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const form = useForm<AdminRemoveListingFormValues>({
+    resolver: zodResolver(adminRemoveListingSchema),
+    mode: "onBlur",
+    defaultValues: { archiveReason: "" },
+  });
+
+  const reasonValue = useWatch({
+    control: form.control,
+    name: "archiveReason",
+    defaultValue: "",
+  });
+
+  const submitting = form.formState.isSubmitting;
 
   const handleStatusChange = (nextStatus: ListingStatusFilter) => {
     setStatusFilter(nextStatus);
-    setCursorHistory([null]);
-    setPageIndex(0);
+    pagination.reset();
+  };
+
+  const openRemoveDialog = (listing: AdminListingItem) => {
+    form.reset({ archiveReason: "" });
+    setServerError(null);
+    setTargetListing(listing);
   };
 
   const closeDialog = () => {
     if (submitting) return;
     setTargetListing(null);
-    setArchiveReason("");
-    setDialogError(null);
+    setServerError(null);
+    form.reset({ archiveReason: "" });
   };
 
-  const handleConfirmRemove = async () => {
+  const handleConfirmRemove = form.handleSubmit(async (values) => {
     if (!targetListing) return;
-    const parsed = adminRemoveListingSchema.safeParse({ archiveReason });
-    if (!parsed.success) {
-      setDialogError(parsed.error.issues[0]?.message ?? "Archive reason is required.");
-      return;
-    }
-
-    setSubmitting(true);
-    setDialogError(null);
+    setServerError(null);
     try {
       const result = await adminRemoveListing({
         listingId: targetListing._id,
-        archiveReason: parsed.data.archiveReason,
+        archiveReason: values.archiveReason,
       });
       toast.success(
         result.autoDeclinedCount > 0
@@ -105,29 +119,11 @@ export function AdminListingsTab() {
           : `Listing removed (${result.deletedImageCount} photo(s) deleted).`,
       );
       setTargetListing(null);
-      setArchiveReason("");
+      form.reset({ archiveReason: "" });
     } catch (error) {
-      setDialogError(extractAppErrorMessage(error, "Could not remove Listing."));
-    } finally {
-      setSubmitting(false);
+      setServerError(extractAppErrorMessage(error, "Could not remove Listing."));
     }
-  };
-
-  const handleNextPage = () => {
-    if (!page || page.isDone || !page.continueCursor) return;
-    const nextIndex = pageIndex + 1;
-    setCursorHistory((prev) => {
-      const updated = prev.slice(0, nextIndex);
-      updated.push(page.continueCursor);
-      return updated;
-    });
-    setPageIndex(nextIndex);
-  };
-
-  const handlePrevPage = () => {
-    if (pageIndex === 0) return;
-    setPageIndex((prev) => Math.max(0, prev - 1));
-  };
+  });
 
   return (
     <div className="space-y-4">
@@ -230,7 +226,7 @@ export function AdminListingsTab() {
                       type="button"
                       size="sm"
                       variant="destructive"
-                      onClick={() => setTargetListing(listing)}
+                      onClick={() => openRemoveDialog(listing)}
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                       Remove Listing
@@ -241,29 +237,12 @@ export function AdminListingsTab() {
             ))}
           </div>
 
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-muted-foreground text-xs">Page {pageIndex + 1}</p>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={pageIndex === 0}
-                onClick={handlePrevPage}
-              >
-                Previous
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={page.isDone}
-                onClick={handleNextPage}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
+          <AdminPaginationControls
+            pageIndex={pagination.pageIndex}
+            isDone={page.isDone}
+            onPrev={pagination.goPrev}
+            onNext={() => pagination.goNext(page.continueCursor, page.isDone)}
+          />
         </>
       )}
 
@@ -286,9 +265,9 @@ export function AdminListingsTab() {
               Cancel
             </Button>
             <Button
-              type="button"
+              type="submit"
+              form="admin-remove-listing-form"
               variant="destructive"
-              onClick={handleConfirmRemove}
               disabled={submitting}
             >
               {submitting ? "Removing..." : "Confirm Removal"}
@@ -296,7 +275,7 @@ export function AdminListingsTab() {
           </>
         }
       >
-        <div className="space-y-3">
+        <form id="admin-remove-listing-form" onSubmit={handleConfirmRemove} className="space-y-3">
           {targetListing &&
           (targetListing.activeApprovedLoanCount > 0 || targetListing.pendingRequestCount > 0) ? (
             <Alert variant="destructive">
@@ -326,9 +305,9 @@ export function AdminListingsTab() {
             </Alert>
           ) : null}
 
-          {dialogError ? (
+          {serverError ? (
             <Alert variant="destructive">
-              <AlertDescription>{dialogError}</AlertDescription>
+              <AlertDescription>{serverError}</AlertDescription>
             </Alert>
           ) : null}
 
@@ -336,7 +315,7 @@ export function AdminListingsTab() {
             <div className="flex items-center justify-between">
               <Label htmlFor="admin-archive-reason">Archive reason (required)</Label>
               <span className="text-muted-foreground text-xs">
-                {archiveReason.length}/{DOMAIN_LIMITS.MAX_REASON_LENGTH}
+                {reasonValue.length}/{DOMAIN_LIMITS.MAX_REASON_LENGTH}
               </span>
             </div>
             <Textarea
@@ -344,12 +323,17 @@ export function AdminListingsTab() {
               rows={3}
               maxLength={DOMAIN_LIMITS.MAX_REASON_LENGTH}
               placeholder="Explain why this Listing is being removed..."
-              value={archiveReason}
-              onChange={(e) => setArchiveReason(e.target.value)}
+              aria-invalid={Boolean(form.formState.errors.archiveReason)}
               disabled={submitting}
+              {...form.register("archiveReason")}
             />
+            {form.formState.errors.archiveReason ? (
+              <p className="text-destructive text-xs">
+                {form.formState.errors.archiveReason.message}
+              </p>
+            ) : null}
           </div>
-        </div>
+        </form>
       </ModalDialog>
     </div>
   );
