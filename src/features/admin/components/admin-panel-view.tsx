@@ -1,11 +1,9 @@
 "use client";
 
-import { useQuery } from "convex/react";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { api } from "../../../../convex/_generated/api";
-import { useHasConvexProvider } from "@/components/providers/app-providers";
+import { useHasConvexProvider, useSyncedCurrentUser } from "@/components/providers/app-providers";
 import { Button } from "@/components/ui/button";
 import { ADMIN_TABS, type AdminTabId } from "@/features/admin/schema";
 import { cn } from "@/lib/utils";
@@ -35,7 +33,7 @@ function UnauthorizedAdminState() {
 }
 
 function AdminPanelContent() {
-  const currentUser = useQuery(api.users.queries.getCurrentUser, {});
+  const currentUser = useSyncedCurrentUser();
   const [activeTab, setActiveTab] = useState<AdminTabId>("users");
 
   if (currentUser === undefined) {

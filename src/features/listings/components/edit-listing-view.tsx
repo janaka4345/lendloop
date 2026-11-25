@@ -8,7 +8,7 @@ import { Component, type ReactNode } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import type { AppErrorData } from "../../../../convex/lib/errors";
-import { useHasConvexProvider } from "@/components/providers/app-providers";
+import { useHasConvexProvider, useSyncedCurrentUser } from "@/components/providers/app-providers";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ListingForm } from "./listing-form";
@@ -79,7 +79,11 @@ class EditListingErrorBoundary extends Component<
 }
 
 function LiveEditListingContent({ listingId }: { listingId: Id<"listings"> }) {
-  const listing = useQuery(api.listings.queries.getListingForEdit, { listingId });
+  const currentUser = useSyncedCurrentUser();
+  const listing = useQuery(
+    api.listings.queries.getListingForEdit,
+    currentUser ? { listingId } : "skip",
+  );
 
   if (listing === undefined) {
     return (

@@ -2,7 +2,7 @@
 
 import { ClerkProvider, useAuth } from "@clerk/nextjs";
 import * as Sentry from "@sentry/nextjs";
-import { ConvexReactClient, useConvexAuth, useMutation } from "convex/react";
+import { ConvexReactClient, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Toaster } from "sonner";
@@ -14,6 +14,18 @@ const ConvexAvailableContext = createContext<boolean>(false);
 
 export function useHasConvexProvider(): boolean {
   return useContext(ConvexAvailableContext);
+}
+
+/**
+ * Returns the synced Convex `User` document for the signed-in Clerk session,
+ * `undefined` while loading, or `null` during the Clerk->Convex JWT handoff
+ * and initial `syncCurrentUser` windows.
+ *
+ * Authenticated views should gate their Convex queries with `currentUser ? args : "skip"`
+ * so queries do not fire before the `User` row exists in Convex.
+ */
+export function useSyncedCurrentUser() {
+  return useQuery(api.users.queries.getCurrentUser, {});
 }
 
 function AuthenticatedUserSync() {
