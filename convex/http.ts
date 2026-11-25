@@ -1,8 +1,10 @@
 import { httpRouter } from "convex/server";
 import { Webhook } from "svix";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { httpAction } from "./_generated/server";
 import { formatStructuredLog } from "../src/domain/redaction";
+import { verifyServiceToken } from "./automation/crypto";
 
 interface ClerkEmailAddress {
   id: string;
@@ -116,6 +118,166 @@ http.route({
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
+  }),
+});
+
+function jsonResponse(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function authenticateN8nRequest(
+  request: Request,
+  endpoint: string,
+): Promise<{ ok: true } | { ok: false; response: Response }> {
+  const currentToken = (process.env.N8N_SERVICE_TOKEN ?? "").trim();
+  const previousToken = (process.env.N8N_SERVICE_TOKEN_PREVIOUS ?? "").trim();
+
+  if (!currentToken && !previousToken) {
+    console.error(
+      formatStructuredLog({
+        level: "error",
+        event: "n8n.http.misconfigured",
+        code: "MISSING_SERVICE_TOKEN",
+        context: { endpoint },
+      }),
+    );
+    return {
+      ok: false,
+      response: jsonResponse({ error: "n8n service token is not configured" }, 500),
+    };
+  }
+
+  const providedToken = request.headers.get("X-N8N-Service-Token");
+  const verification = await verifyServiceToken(providedToken, currentToken, previousToken);
+  if (!verification.valid) {
+    console.warn(
+      formatStructuredLog({
+        level: "warn",
+        event: "n8n.http.unauthorized",
+        code: "INVALID_SERVICE_TOKEN",
+        context: { endpoint },
+      }),
+    );
+    return {
+      ok: false,
+      response: jsonResponse({ error: "Unauthorized" }, 401),
+    };
+  }
+
+  if (verification.usedPrevious) {
+    console.info(
+      formatStructuredLog({
+        level: "info",
+        event: "n8n.http.previous_token_used",
+        context: { endpoint },
+      }),
+    );
+  }
+
+  return { ok: true };
+}
+
+http.route({
+  path: "/api/n8n/overdue-loans",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await authenticateN8nRequest(request, "/api/n8n/overdue-loans");
+    if (!auth.ok) return auth.response;
+
+    const url = new URL(request.url);
+    const rawCursor = url.searchParams.get("cursor");
+    const cursor = rawCursor && rawCursor.trim().length > 0 ? rawCursor.trim() : null;
+
+    const rawLimit = url.searchParams.get("limit");
+    let limit = 100;
+    if (rawLimit !== null && rawLimit.trim().length > 0) {
+      const parsed = Number(rawLimit);
+      if (!Number.isFinite(parsed) || parsed < 1) {
+        return jsonResponse({ error: "Invalid limit parameter" }, 400);
+      }
+      limit = Math.min(100, Math.floor(parsed));
+    }
+
+    const batch = await ctx.runQuery(internal.automation.internal.listOverdueLoansBatch, {
+      cursor,
+      limit,
+    });
+
+    return jsonResponse(batch, 200);
+  }),
+});
+
+interface OverdueReminderAckPayload {
+  loanId?: unknown;
+  status?: unknown;
+  attemptCount?: unknown;
+  error?: unknown;
+}
+
+http.route({
+  path: "/api/n8n/overdue-reminders/ack",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await authenticateN8nRequest(request, "/api/n8n/overdue-reminders/ack");
+    if (!auth.ok) return auth.response;
+
+    const idempotencyKey = (request.headers.get("X-Idempotency-Key") ?? "").trim();
+    if (!idempotencyKey) {
+      return jsonResponse({ error: "Missing X-Idempotency-Key header" }, 400);
+    }
+
+    let payload: OverdueReminderAckPayload;
+    try {
+      payload = (await request.json()) as OverdueReminderAckPayload;
+    } catch {
+      return jsonResponse({ error: "Invalid JSON payload" }, 400);
+    }
+
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      typeof payload.loanId !== "string" ||
+      payload.loanId.trim().length === 0 ||
+      (payload.status !== "sent" && payload.status !== "failed")
+    ) {
+      return jsonResponse({ error: "Invalid acknowledgement payload" }, 400);
+    }
+
+    const attemptCount =
+      typeof payload.attemptCount === "number" && Number.isFinite(payload.attemptCount)
+        ? Math.max(1, Math.floor(payload.attemptCount))
+        : 1;
+    const lastError = typeof payload.error === "string" ? payload.error : undefined;
+
+    let result;
+    try {
+      result = await ctx.runMutation(internal.automation.internal.ackOverdueReminder, {
+        loanId: payload.loanId.trim() as Id<"loans">,
+        idempotencyKey,
+        status: payload.status,
+        attemptCount,
+        ...(lastError !== undefined ? { lastError } : {}),
+      });
+    } catch {
+      return jsonResponse({ error: "Invalid loanId" }, 400);
+    }
+
+    if (!result.found) {
+      return jsonResponse({ error: "Loan not found" }, 404);
+    }
+
+    return jsonResponse(
+      {
+        acknowledged: true,
+        duplicate: result.duplicate,
+        activityId: result.activityId,
+        status: result.status,
+      },
+      200,
+    );
   }),
 });
 

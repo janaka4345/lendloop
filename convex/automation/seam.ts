@@ -1,3 +1,4 @@
+import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import type { AutomationEventType, AutomationRecipientRole } from "../../src/domain/types";
@@ -10,7 +11,8 @@ export interface EnqueueAutomationActivityInput {
 }
 
 /**
- * Atomically enqueues a `pending` Automation Activity record inside the caller's mutation.
+ * Atomically enqueues a `pending` Automation Activity record inside the caller's mutation
+ * and schedules immediate outbound webhook delivery for Loan notification events.
  * Idempotent on `idempotencyKey` so duplicate triggers never create duplicate outbox rows.
  */
 export async function enqueueAutomationActivity(
@@ -26,7 +28,7 @@ export async function enqueueAutomationActivity(
     return existing._id;
   }
 
-  return ctx.db.insert("automationActivities", {
+  const activityId = await ctx.db.insert("automationActivities", {
     loanId: input.loanId,
     eventType: input.eventType,
     idempotencyKey: input.idempotencyKey,
@@ -35,4 +37,13 @@ export async function enqueueAutomationActivity(
     recipientRole: input.recipientRole,
     createdAt: Date.now(),
   });
+
+  if (input.eventType !== "overdue_reminder") {
+    await ctx.scheduler.runAfter(0, internal.automation.actions.deliverLoanNotification, {
+      activityId,
+      attempt: 1,
+    });
+  }
+
+  return activityId;
 }
