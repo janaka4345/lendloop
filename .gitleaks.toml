@@ -13,4 +13,10 @@ regexes = [
   '''pk_test_replace_with_your_clerk_publishable_key''',
   '''whsec_Y2lfc3ludGhldGljX25vbl9zZWNyZXRfcGxhY2Vob2xkZXI=''',
   '''sk_live_abc123456789''',
+  '''ci-synthetic-n8n-encryption-key-not-a-secret''',
+  '''ci-synthetic-n8n-jwt-secret-not-a-secret''',
+  '''ci-synthetic-n8n-service-token-not-a-secret''',
+  '''local-dev-n8n-encryption-key-change-me''',
+  '''local-dev-n8n-jwt-secret-change-me''',
+  '''local-dev-n8n-service-token-change-me''',
 ]

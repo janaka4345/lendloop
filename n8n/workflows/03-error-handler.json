@@ -1,0 +1,113 @@
+{
+  "name": "LendLoop — 03 Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b3a00003-0000-4000-8000-000000000001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-ops-email",
+              "name": "opsAlertEmail",
+              "value": "ops@lendloop.local",
+              "type": "string"
+            },
+            {
+              "id": "cfg-from-email",
+              "name": "fromEmail",
+              "value": "alerts@lendloop.local",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b3a00003-0000-4000-8000-000000000002",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const trigger = $('Error Trigger').first().json || {};\nconst config = $input.first().json || {};\nconst execution = trigger.execution || {};\nconst workflow = trigger.workflow || {};\nconst err = execution.error || {};\n\nfunction redact(input) {\n  return String(input || 'Unknown error')\n    .replace(/\\bBearer\\s+[A-Za-z0-9\\-._~+/]+=*/gi, 'Bearer [REDACTED]')\n    .replace(/\\beyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\b/g, '[REDACTED]')\n    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/gi, '[REDACTED]')\n    .slice(0, 300);\n}\n\nconst workflowName = String(workflow.name || 'Unknown Workflow');\nconst workflowId = String(workflow.id || 'unknown');\nconst executionId = String(execution.id || 'unknown');\nconst lastNode = String(execution.lastNodeExecuted || 'unknown');\nconst errorName = String(err.name || 'Error');\nconst sanitizedMessage = redact(err.message);\n\nreturn [\n  {\n    json: {\n      fromEmail: config.fromEmail,\n      opsAlertEmail: config.opsAlertEmail,\n      subject: `[LendLoop Ops] Workflow error in ${workflowName}`,\n      text: [\n        'An unhandled n8n workflow error occurred (PII stripped):',\n        `Workflow: ${workflowName} (${workflowId})`,\n        `Execution ID: ${executionId}`,\n        `Last Node: ${lastNode}`,\n        `Error Type: ${errorName}`,\n        `Summary: ${sanitizedMessage}`,\n      ].join('\\n'),\n    },\n  },\n];"
+      },
+      "id": "b3a00003-0000-4000-8000-000000000003",
+      "name": "Sanitize Ops Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $json.fromEmail }}",
+        "toEmail": "={{ $json.opsAlertEmail }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {}
+      },
+      "id": "b3a00003-0000-4000-8000-000000000004",
+      "name": "Send Ops Alert Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [920, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "smtp": {
+          "id": "__REPLACE_ON_IMPORT__",
+          "name": "LendLoop SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Sanitize Ops Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitize Ops Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Ops Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

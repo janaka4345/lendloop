@@ -8,3 +8,13 @@ services:
       CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuY2kubGVuZGxvb3AubG9jYWwk
       CLERK_SECRET_KEY: sk_test_ci_synthetic_non_secret_placeholder
       APP_ENV: ci
+
+  n8n-init:
+    environment:
+      N8N_ENCRYPTION_KEY: ci-synthetic-n8n-encryption-key-not-a-secret
+      N8N_JWT_SECRET: ci-synthetic-n8n-jwt-secret-not-a-secret
+      N8N_SERVICE_TOKEN: ci-synthetic-n8n-service-token-not-a-secret
+
+  n8n:
+    environment:
+      N8N_ENCRYPTION_KEY: ci-synthetic-n8n-encryption-key-not-a-secret

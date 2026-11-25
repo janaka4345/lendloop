@@ -41,6 +41,75 @@ services:
     depends_on:
       mailpit:
         condition: service_started
+      n8n:
+        condition: service_healthy
+
+  n8n-init:
+    image: docker.io/n8nio/n8n:1.105.4@sha256:9f35e15e12c625cc432b1a9533e8b8f1e78c76e32af41a68ae2b9e7eb96a4a90
+    entrypoint: ["node", "/init/bootstrap.mjs"]
+    restart: "no"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-local-dev-n8n-encryption-key-change-me}
+      N8N_JWT_SECRET: ${N8N_JWT_SECRET:-local-dev-n8n-jwt-secret-change-me}
+      N8N_SERVICE_TOKEN: ${N8N_SERVICE_TOKEN:-local-dev-n8n-service-token-change-me}
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+      - ./n8n/init:/init:ro
+
+  n8n:
+    image: docker.io/n8nio/n8n:1.105.4@sha256:9f35e15e12c625cc432b1a9533e8b8f1e78c76e32af41a68ae2b9e7eb96a4a90
+    ports:
+      - "5678:5678"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      N8N_HOST: 0.0.0.0
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-local-dev-n8n-encryption-key-change-me}
+      N8N_SECURE_COOKIE: "false"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      GENERIC_TIMEZONE: UTC
+    volumes:
+      - n8n_data:/home/node/.n8n
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5678/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      n8n-init:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
 
   mailpit:
     image: axllent/mailpit:v1.24@sha256:3ad9483ac2dea937ae402b95435ab12c3355d2373a1002a49491db0be536d8fa
@@ -54,3 +123,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  n8n_data:

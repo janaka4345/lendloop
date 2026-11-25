@@ -124,6 +124,9 @@ jobs:
         run: pnpm test:e2e
         env:
           PLAYWRIGHT_BASE_URL: "http://localhost:3000"
+          N8N_WEBHOOK_URL: "http://localhost:5678/webhook/lendloop-loan-notification"
+          N8N_JWT_SECRET: "ci-synthetic-n8n-jwt-secret-not-a-secret"
+          MAILPIT_API_URL: "http://localhost:8025"
 
       - name: Print container logs on failure
         if: failure()
