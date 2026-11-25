@@ -81,12 +81,14 @@ export function buildContentSecurityPolicy(env: SecurityHeadersEnv): string {
     "'self'",
     "'unsafe-inline'",
     ...(isDev ? ["'unsafe-eval'"] : []),
-    ...(clerkOrigin ? [clerkOrigin] : []),
+    ...(clerkOrigin
+      ? [clerkOrigin, "https://*.protect.clerk.com", "https://challenges.cloudflare.com"]
+      : []),
   ];
 
   const connectSrc = [
     "'self'",
-    ...(clerkOrigin ? [clerkOrigin] : []),
+    ...(clerkOrigin ? [clerkOrigin, "https://*.protect.clerk.com:*"] : []),
     ...(convexOrigin ? [convexOrigin] : []),
     ...(convexWsOrigin ? [convexWsOrigin] : []),
     ...(sentryOrigin ? [sentryOrigin] : []),
@@ -97,7 +99,12 @@ export function buildContentSecurityPolicy(env: SecurityHeadersEnv): string {
     "blob:",
     "data:",
     ...(convexOrigin ? [convexOrigin] : []),
-    ...(clerkOrigin ? [clerkOrigin] : []),
+    ...(clerkOrigin ? [clerkOrigin, "https://img.clerk.com"] : []),
+  ];
+
+  const frameSrc = [
+    "'self'",
+    ...(clerkOrigin ? ["https://challenges.cloudflare.com", "https://*.protect.clerk.com"] : []),
   ];
 
   const directives = [
@@ -106,6 +113,7 @@ export function buildContentSecurityPolicy(env: SecurityHeadersEnv): string {
     "style-src 'self' 'unsafe-inline'",
     `connect-src ${connectSrc.join(" ")}`,
     `img-src ${imgSrc.join(" ")}`,
+    `frame-src ${frameSrc.join(" ")}`,
     "font-src 'self' data:",
     "worker-src 'self' blob:",
     "object-src 'none'",
