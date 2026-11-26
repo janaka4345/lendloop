@@ -1,0 +1,11 @@
+# Published-digest override for verifying build-once portability against an
+# immutable ECR @sha256: image digest with zero local rebuild.
+#
+# Usage:
+#   aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com
+#   LENDLOOP_IMAGE="<account>.dkr.ecr.us-east-1.amazonaws.com/lendloop-web@sha256:<64-hex>" \
+#     docker compose -f docker-compose.yml -f docker-compose.published.yml up --no-build
+services:
+  web:
+    image: ${LENDLOOP_IMAGE:?Set LENDLOOP_IMAGE to a published ECR digest URI (e.g. <account>.dkr.ecr.us-east-1.amazonaws.com/lendloop-web@sha256:...)}
+    pull_policy: always
