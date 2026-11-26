@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  assertDeployedImageDigest,
   buildSafeUpdateSourceConfiguration,
   validateDigestImageUri,
   verifyServiceHealth,
@@ -88,6 +89,35 @@ describe("App Runner read-modify-write deploy helper", () => {
       expect(() =>
         buildSafeUpdateSourceConfiguration({ SourceConfiguration: {} }, VALID_ECR_URI),
       ).toThrow(/ImageRepository/i);
+    });
+  });
+
+  describe("assertDeployedImageDigest", () => {
+    it("passes when the running service serves the exact expected digest", () => {
+      expect(() =>
+        assertDeployedImageDigest(
+          {
+            SourceConfiguration: {
+              ImageRepository: { ImageIdentifier: VALID_ECR_URI, ImageRepositoryType: "ECR" },
+            },
+          },
+          VALID_ECR_URI,
+        ),
+      ).not.toThrow();
+    });
+
+    it("throws when App Runner silently auto-rolled back to a previous digest", () => {
+      const previousUri = `123456789012.dkr.ecr.us-east-1.amazonaws.com/lendloop-web@sha256:${"b".repeat(64)}`;
+      expect(() =>
+        assertDeployedImageDigest(
+          {
+            SourceConfiguration: {
+              ImageRepository: { ImageIdentifier: previousUri, ImageRepositoryType: "ECR" },
+            },
+          },
+          VALID_ECR_URI,
+        ),
+      ).toThrow(/auto-rolled back/i);
     });
   });
 

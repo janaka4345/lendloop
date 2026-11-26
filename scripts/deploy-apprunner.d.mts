@@ -30,6 +30,11 @@ export function buildSafeUpdateSourceConfiguration(
   imageUri: string,
 ): Required<Pick<AppRunnerSourceConfiguration, "ImageRepository">> & AppRunnerSourceConfiguration;
 
+export function assertDeployedImageDigest(
+  service: AppRunnerServiceDescription,
+  expectedImageUri: string,
+): void;
+
 export function verifyServiceHealth(options: {
   baseUrl: string;
   fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>;
@@ -42,7 +47,6 @@ export function deployAppRunnerService(options: {
   imageUri: string;
   region?: string;
   healthBaseUrl?: string;
-  skipHealthCheck?: boolean;
 }): Promise<{
   serviceArn: string;
   serviceUrl: string;

@@ -133,7 +133,7 @@ Create **3 separate IAM roles** (never share the `prod` role with non-prod workf
 }
 ```
 
-- For `lendloop-gha-dev-build-deploy`, also grant `ecr:GetAuthorizationToken` (`Resource: "*"`) and `ecr:BatchCheckLayerAvailability`, `ecr:CompleteLayerUpload`, `ecr:InitiateLayerUpload`, `ecr:PutImage`, `ecr:UploadLayerPart`, `ecr:DescribeImages` scoped to `repository/lendloop-web`, plus `apprunner:*` scoped to `service/lendloop-dev/*`.
+- For `lendloop-gha-dev-build-deploy`, also grant `ecr:GetAuthorizationToken` (`Resource: "*"`) and `ecr:BatchCheckLayerAvailability`, `ecr:CompleteLayerUpload`, `ecr:InitiateLayerUpload`, `ecr:PutImage`, `ecr:UploadLayerPart`, `ecr:DescribeImages` scoped to `repository/lendloop-web`, plus explicit `apprunner:DescribeService`, `apprunner:ResumeService`, and `apprunner:UpdateService` scoped to `service/lendloop-dev/*`.
 
 ### 2.3 SSM Parameter Store `SecureString` Secrets (Free Tier)
 
@@ -181,7 +181,9 @@ In **GitHub → Settings → Environments**, create `dev`, `qa`, `staging`, and 
    - Managed policy: `AWSAppRunnerServicePolicyForECRAccess`
 2. **Per-Environment Instance Roles (`lendloop-apprunner-instance-<env>`):**
    - Trust entity: `tasks.apprunner.amazonaws.com`
-   - Inline policy allowing `ssm:GetParameters` and `kms:Decrypt` scoped strictly to `arn:aws:ssm:us-east-1:<ACCOUNT_ID>:parameter/lendloop/<env>/*`.
+   - Inline policy with two statements:
+     1. `ssm:GetParameters` scoped strictly to `arn:aws:ssm:us-east-1:<ACCOUNT_ID>:parameter/lendloop/<env>/*`.
+     2. `kms:Decrypt` scoped to `arn:aws:kms:us-east-1:<ACCOUNT_ID>:key/*` with condition `StringEquals: { "kms:ViaService": "ssm.us-east-1.amazonaws.com" }` (allows decrypting SSM `SecureString` parameters via the default `alias/aws/ssm` KMS key without granting direct KMS access).
 
 ### 3.2 Create 4 Demo-Sized App Runner Services
 

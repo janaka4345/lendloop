@@ -64,6 +64,23 @@ export function buildSafeUpdateSourceConfiguration(existingService, imageUri) {
 }
 
 /**
+ * Verifies that the RUNNING App Runner service is actually serving the expected
+ * immutable digest (catching silent App Runner auto-rollbacks on failed deploys).
+ *
+ * @param {{ SourceConfiguration?: { ImageRepository?: { ImageIdentifier?: string } } }} service
+ * @param {string} expectedImageUri
+ */
+export function assertDeployedImageDigest(service, expectedImageUri) {
+  validateDigestImageUri(expectedImageUri);
+  const actual = service?.SourceConfiguration?.ImageRepository?.ImageIdentifier ?? "";
+  if (actual.trim() !== expectedImageUri.trim()) {
+    throw new Error(
+      `App Runner service is running unexpected image (${JSON.stringify(actual)}) instead of requested digest (${JSON.stringify(expectedImageUri)}). The deployment may have failed and auto-rolled back.`,
+    );
+  }
+}
+
+/**
  * Polls `/healthz` and `/readyz` on the deployed App Runner URL until both
  * return HTTP 200 or maxAttempts is exhausted.
  *
@@ -173,7 +190,6 @@ function parseCliArgs(argv) {
     imageUri: process.env.IMAGE_URI ?? "",
     region: process.env.AWS_REGION ?? "us-east-1",
     healthBaseUrl: process.env.HEALTH_BASE_URL ?? "",
-    skipHealthCheck: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -186,8 +202,6 @@ function parseCliArgs(argv) {
       parsed.region = argv[++i] ?? "us-east-1";
     } else if (arg === "--health-base-url") {
       parsed.healthBaseUrl = argv[++i] ?? "";
-    } else if (arg === "--skip-health-check") {
-      parsed.skipHealthCheck = true;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -201,7 +215,6 @@ export async function deployAppRunnerService({
   imageUri,
   region = "us-east-1",
   healthBaseUrl = "",
-  skipHealthCheck = false,
 }) {
   if (!serviceArn) {
     throw new Error("Missing required --service-arn (or APPRUNNER_SERVICE_ARN env var).");
@@ -235,17 +248,17 @@ export async function deployAppRunnerService({
   runAwsJson(["apprunner", "update-service", "--region", region, "--cli-input-json", updateInput]);
 
   const runningService = await waitForServiceRunning({ serviceArn, region });
+  assertDeployedImageDigest(runningService, imageUri);
+
   const resolvedUrl =
     healthBaseUrl || (runningService?.ServiceUrl ? `https://${runningService.ServiceUrl}` : "");
 
-  if (!skipHealthCheck) {
-    if (!resolvedUrl) {
-      throw new Error("Could not determine App Runner ServiceUrl for health verification.");
-    }
-    console.log(`[deploy-apprunner] Verifying /healthz and /readyz on ${resolvedUrl}...`);
-    await verifyServiceHealth({ baseUrl: resolvedUrl });
-    console.log("[deploy-apprunner] Health and readiness probes passed.");
+  if (!resolvedUrl) {
+    throw new Error("Could not determine App Runner ServiceUrl for health verification.");
   }
+  console.log(`[deploy-apprunner] Verifying /healthz and /readyz on ${resolvedUrl}...`);
+  await verifyServiceHealth({ baseUrl: resolvedUrl });
+  console.log("[deploy-apprunner] Health and readiness probes passed.");
 
   return {
     serviceArn,
