@@ -78,13 +78,24 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           IMAGE_REF="${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}"
-          docker push "${IMAGE_REF}"
-          DIGEST=$(aws ecr describe-images \
+          EXISTING_DIGEST=$(aws ecr describe-images \
             --region "${AWS_REGION}" \
             --repository-name "${ECR_REPOSITORY}" \
             --image-ids "imageTag=${GITHUB_SHA}" \
             --query 'imageDetails[0].imageDigest' \
-            --output text)
+            --output text 2>/dev/null || true)
+          if [[ "${EXISTING_DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            DIGEST="${EXISTING_DIGEST}"
+            echo "Reusing existing immutable ECR image for commit ${GITHUB_SHA}: ${DIGEST}"
+          else
+            docker push "${IMAGE_REF}"
+            DIGEST=$(aws ecr describe-images \
+              --region "${AWS_REGION}" \
+              --repository-name "${ECR_REPOSITORY}" \
+              --image-ids "imageTag=${GITHUB_SHA}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text)
+          fi
           if [[ ! "${DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
             echo "::error::Failed to resolve valid @sha256 digest from ECR (got: ${DIGEST})"
             exit 1
