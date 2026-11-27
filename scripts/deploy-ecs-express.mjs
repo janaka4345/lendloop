@@ -236,8 +236,7 @@ async function waitForDeploymentComplete({
         );
       }
 
-      const rolloutCompleted =
-        !primaryDeployment || primaryDeployment.rolloutState === "COMPLETED";
+      const rolloutCompleted = !primaryDeployment || primaryDeployment.rolloutState === "COMPLETED";
       const revisionMatches = !targetRevisionArn || activeRevision === targetRevisionArn;
       if (
         statusCode === "ACTIVE" &&
@@ -357,7 +356,9 @@ const isDirectExecution =
 if (isDirectExecution) {
   deployEcsExpressService(parseCliArgs(process.argv.slice(2)))
     .then((result) => {
-      console.log(`[deploy-ecs-express] Deploy complete: ${result.serviceUrl} -> ${result.imageUri}`);
+      console.log(
+        `[deploy-ecs-express] Deploy complete: ${result.serviceUrl} -> ${result.imageUri}`,
+      );
     })
     .catch((error) => {
       console.error(

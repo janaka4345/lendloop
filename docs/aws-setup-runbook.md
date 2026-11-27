@@ -76,11 +76,11 @@ This 4-part runbook documents the repeatable, non-IaC AWS setup and day-to-day o
 
 Create **3 separate IAM roles** (never share the `prod` role with non-prod workflows). Replace `<ACCOUNT_ID>` and `<OWNER>/<REPO>` with your AWS project ID and GitHub repository slug.
 
-| IAM Role Name                   | Used By Workflow / Environment                      | Permitted Scope                                                                                 |
-| ------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `lendloop-gha-dev-build-deploy` | `cd.yml` (`environment: dev`, `main` push)          | Push/read `lendloop-web` ECR + describe/update **only** `lendloop-dev` + scoped `iam:PassRole`  |
-| `lendloop-gha-nonprod-promote`  | `promote.yml` (`environment: qa`, `staging`)        | Read-only ECR `DescribeImages` + describe/update `lendloop-qa`/`staging` + scoped `iam:PassRole`|
-| `lendloop-gha-prod-promote`     | `promote.yml` (`environment: prod`, manual approve) | Read-only ECR `DescribeImages` + describe/update **only** `lendloop-prod` + scoped `iam:PassRole`|
+| IAM Role Name                   | Used By Workflow / Environment                      | Permitted Scope                                                                                   |
+| ------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `lendloop-gha-dev-build-deploy` | `cd.yml` (`environment: dev`, `main` push)          | Push/read `lendloop-web` ECR + describe/update **only** `lendloop-dev` + scoped `iam:PassRole`    |
+| `lendloop-gha-nonprod-promote`  | `promote.yml` (`environment: qa`, `staging`)        | Read-only ECR `DescribeImages` + describe/update `lendloop-qa`/`staging` + scoped `iam:PassRole`  |
+| `lendloop-gha-prod-promote`     | `promote.yml` (`environment: prod`, manual approve) | Read-only ECR `DescribeImages` + describe/update **only** `lendloop-prod` + scoped `iam:PassRole` |
 
 #### Trust Policy Pattern (example for `lendloop-gha-prod-promote`)
 

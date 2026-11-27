@@ -48,7 +48,9 @@ describe("ECS Express Mode read-modify-write deploy helper", () => {
         activeConfigurations: [
           {
             createdAt: 1_700_000_000,
-            ingressPaths: [{ accessType: "PUBLIC", endpoint: "lendloop-dev.ap-southeast-2.ecs.aws" }],
+            ingressPaths: [
+              { accessType: "PUBLIC", endpoint: "lendloop-dev.ap-southeast-2.ecs.aws" },
+            ],
             primaryContainer: {
               image: `041459489381.dkr.ecr.ap-southeast-2.amazonaws.com/lendloop-web@sha256:${"b".repeat(64)}`,
               containerPort: 3000,
