@@ -1,0 +1,124 @@
+name: CD (Build Once & Deploy Dev)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-dev-main
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: lendloop-web
+
+jobs:
+  build-and-deploy-dev:
+    name: Build Once, Push ECR Digest & Deploy Dev
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Configure AWS credentials via GitHub OIDC (dev role)
+        uses: aws-actions/configure-aws-credentials@45666896f5d8e0f10ae255413f3a4cdd03bdc8f5 # v6.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783 # v2.2.0
+
+      - name: Build immutable container image once
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          IMAGE_TAG="${GITHUB_SHA}"
+          docker build \
+            --tag "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}" \
+            .
+
+      - name: Scan built image with Grype (critical, only-fixed)
+        uses: anchore/scan-action@11983a512817154c80a9db660c1a184be7513ed6 # v7.4.3
+        with:
+          image: "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          fail-build: true
+          severity-cutoff: "critical"
+          only-fixed: true
+          output-format: "table"
+
+      - name: Push image to ECR and capture exact @sha256 digest
+        id: push
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          IMAGE_REF="${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+          docker push "${IMAGE_REF}"
+          DIGEST=$(aws ecr describe-images \
+            --region "${AWS_REGION}" \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids "imageTag=${GITHUB_SHA}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)
+          if [[ ! "${DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::Failed to resolve valid @sha256 digest from ECR (got: ${DIGEST})"
+            exit 1
+          fi
+          IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}@${DIGEST}"
+          echo "image_digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
+          echo "image_uri=${IMAGE_URI}" >> "${GITHUB_OUTPUT}"
+          echo "Published immutable image: ${IMAGE_URI}"
+
+      - name: Deploy Convex backend (dev)
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: npx convex deploy --yes
+
+      - name: Update dev App Runner service (read-modify-write) and verify /healthz & /readyz
+        env:
+          APPRUNNER_SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
+          IMAGE_URI: ${{ steps.push.outputs.image_uri }}
+          HEALTH_BASE_URL: ${{ vars.APP_URL }}
+        run: |
+          node scripts/deploy-apprunner.mjs \
+            --service-arn "${APPRUNNER_SERVICE_ARN}" \
+            --image-uri "${IMAGE_URI}" \
+            --region "${AWS_REGION}" \
+            ${HEALTH_BASE_URL:+--health-base-url "${HEALTH_BASE_URL}"}
+
+      - name: Publish deployment summary
+        run: |
+          {
+            echo "## Dev Deployment Complete"
+            echo ""
+            echo "- **Commit:** \`${GITHUB_SHA}\`"
+            echo "- **Digest:** \`${{ steps.push.outputs.image_digest }}\`"
+            echo "- **Image URI:** \`${{ steps.push.outputs.image_uri }}\`"
+            echo ""
+            echo "To promote this exact digest to \`qa\` → \`staging\` → \`prod\`, run **CD Promote & Rollback** with \`image_digest=${{ steps.push.outputs.image_digest }}\`."
+          } >> "${GITHUB_STEP_SUMMARY}"

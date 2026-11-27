@@ -24,6 +24,7 @@ LendLoop is structured as a **domain-sliced modular monolith** across five verti
 - [GLOSSARY.md](GLOSSARY.md) — Canonical ubiquitous language (`User`, `Lender`, `Borrower`, `Admin`, `Trusted Lender`, `Listing`, `Loan`, `Category`, `Condition`, `Availability`, `Overdue`, `Automation Activity`, `Audit Log`).
 - [CODING_STANDARDS.md](CODING_STANDARDS.md) — Judgement-call engineering and security standards.
 - [docs/n8n-workflows.md](docs/n8n-workflows.md) — n8n workflow architecture, credential setup, rotation, and troubleshooting.
+- [docs/aws-setup-runbook.md](docs/aws-setup-runbook.md) — 4-part AWS Console setup and operations runbook (`us-east-1` ECR, OIDC, App Runner, SSM secrets, CloudWatch, Budgets, and zero-rebuild rollback).
 - Architecture Decision Records:
   - [ADR-0001: Modular Monolith & Convex Seams](docs/adr/0001-modular-monolith-and-convex-seams.md)
   - [ADR-0002: Convex-Authoritative RBAC & Dual-Path Clerk Sync](docs/adr/0002-convex-authoritative-rbac-and-dual-path-clerk-sync.md)
@@ -73,6 +74,8 @@ LendLoop is structured as a **domain-sliced modular monolith** across five verti
    - **n8n UI:** `http://localhost:5678` (3 workflows auto-imported and Workflows 1 & 2 activated by `n8n-init`)
 
 > **Hot-reload dev alternative:** Run `pnpm dev` alongside `npx convex dev --local` and `docker compose up n8n mailpit`.
+>
+> **Published-digest portability check:** To pull and run an immutable ECR `@sha256:` digest locally with zero rebuild, run `LENDLOOP_IMAGE="<account>.dkr.ecr.us-east-1.amazonaws.com/lendloop-web@sha256:<digest>" docker compose -f docker-compose.yml -f docker-compose.published.yml up --no-build`.
 
 ## Runtime Environment Variables
 

@@ -1,0 +1,321 @@
+name: CD Promote & Rollback (Digest Promotion)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: "Immutable ECR image digest (sha256:<64-hex>)"
+        required: true
+        type: string
+      mode:
+        description: "Sequential promotion (qa -> staging -> prod) or single-env zero-rebuild rollback"
+        required: true
+        default: "promote"
+        type: choice
+        options:
+          - promote
+          - rollback
+      max_environment:
+        description: "For promote mode: highest environment to promote through"
+        required: false
+        default: "prod"
+        type: choice
+        options:
+          - qa
+          - staging
+          - prod
+      rollback_environment:
+        description: "For rollback mode: single target environment to roll back"
+        required: false
+        default: "prod"
+        type: choice
+        options:
+          - dev
+          - qa
+          - staging
+          - prod
+      skip_convex_deploy:
+        description: "Skip Convex deploy during rollback (safe when schema follows expand-and-contract)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: lendloop-web
+
+jobs:
+  validate-inputs:
+    name: Validate Digest Input
+    runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.validate.outputs.image_digest }}
+    steps:
+      - name: Validate strict sha256 digest format
+        id: validate
+        env:
+          INPUT_DIGEST: ${{ inputs.image_digest }}
+        run: |
+          DIGEST="${INPUT_DIGEST##*@}"
+          if [[ ! "${DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::image_digest must be a valid sha256:<64-hex> digest (got: ${INPUT_DIGEST})"
+            exit 1
+          fi
+          echo "image_digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
+
+  promote-qa:
+    name: Promote to QA
+    needs: [validate-inputs]
+    if: inputs.mode == 'promote'
+    runs-on: ubuntu-latest
+    environment: qa
+    concurrency:
+      group: cd-qa
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials via GitHub OIDC (non-prod promote role)
+        uses: aws-actions/configure-aws-credentials@45666896f5d8e0f10ae255413f3a4cdd03bdc8f5 # v6.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify digest exists in Amazon ECR
+        id: ecr
+        env:
+          IMAGE_DIGEST: ${{ needs.validate-inputs.outputs.image_digest }}
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws ecr describe-images \
+            --region "${AWS_REGION}" \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids "imageDigest=${IMAGE_DIGEST}" >/dev/null
+          echo "image_uri=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${IMAGE_DIGEST}" >> "${GITHUB_OUTPUT}"
+
+      - name: Deploy Convex backend (qa — expand-and-contract)
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: npx convex deploy --yes
+
+      - name: Update qa App Runner service and verify /healthz & /readyz
+        env:
+          APPRUNNER_SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
+          IMAGE_URI: ${{ steps.ecr.outputs.image_uri }}
+          HEALTH_BASE_URL: ${{ vars.APP_URL }}
+        run: |
+          node scripts/deploy-apprunner.mjs \
+            --service-arn "${APPRUNNER_SERVICE_ARN}" \
+            --image-uri "${IMAGE_URI}" \
+            --region "${AWS_REGION}" \
+            ${HEALTH_BASE_URL:+--health-base-url "${HEALTH_BASE_URL}"}
+
+  promote-staging:
+    name: Promote to Staging (Manual Approval)
+    needs: [validate-inputs, promote-qa]
+    if: inputs.mode == 'promote' && (inputs.max_environment == 'staging' || inputs.max_environment == 'prod')
+    runs-on: ubuntu-latest
+    environment: staging
+    concurrency:
+      group: cd-staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials via GitHub OIDC (non-prod promote role)
+        uses: aws-actions/configure-aws-credentials@45666896f5d8e0f10ae255413f3a4cdd03bdc8f5 # v6.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify digest exists in Amazon ECR
+        id: ecr
+        env:
+          IMAGE_DIGEST: ${{ needs.validate-inputs.outputs.image_digest }}
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws ecr describe-images \
+            --region "${AWS_REGION}" \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids "imageDigest=${IMAGE_DIGEST}" >/dev/null
+          echo "image_uri=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${IMAGE_DIGEST}" >> "${GITHUB_OUTPUT}"
+
+      - name: Deploy Convex backend (staging — expand-and-contract)
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: npx convex deploy --yes
+
+      - name: Update staging App Runner service and verify /healthz & /readyz
+        env:
+          APPRUNNER_SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
+          IMAGE_URI: ${{ steps.ecr.outputs.image_uri }}
+          HEALTH_BASE_URL: ${{ vars.APP_URL }}
+        run: |
+          node scripts/deploy-apprunner.mjs \
+            --service-arn "${APPRUNNER_SERVICE_ARN}" \
+            --image-uri "${IMAGE_URI}" \
+            --region "${AWS_REGION}" \
+            ${HEALTH_BASE_URL:+--health-base-url "${HEALTH_BASE_URL}"}
+
+  promote-prod:
+    name: Promote to Prod (Manual Approval & Dedicated Role)
+    needs: [validate-inputs, promote-staging]
+    if: inputs.mode == 'promote' && inputs.max_environment == 'prod'
+    runs-on: ubuntu-latest
+    environment: prod
+    concurrency:
+      group: cd-prod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials via GitHub OIDC (dedicated prod role)
+        uses: aws-actions/configure-aws-credentials@45666896f5d8e0f10ae255413f3a4cdd03bdc8f5 # v6.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify digest exists in Amazon ECR
+        id: ecr
+        env:
+          IMAGE_DIGEST: ${{ needs.validate-inputs.outputs.image_digest }}
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws ecr describe-images \
+            --region "${AWS_REGION}" \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids "imageDigest=${IMAGE_DIGEST}" >/dev/null
+          echo "image_uri=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${IMAGE_DIGEST}" >> "${GITHUB_OUTPUT}"
+
+      - name: Deploy Convex backend (prod — expand-and-contract)
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: npx convex deploy --yes
+
+      - name: Update prod App Runner service and verify /healthz & /readyz
+        env:
+          APPRUNNER_SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
+          IMAGE_URI: ${{ steps.ecr.outputs.image_uri }}
+          HEALTH_BASE_URL: ${{ vars.APP_URL }}
+        run: |
+          node scripts/deploy-apprunner.mjs \
+            --service-arn "${APPRUNNER_SERVICE_ARN}" \
+            --image-uri "${IMAGE_URI}" \
+            --region "${AWS_REGION}" \
+            ${HEALTH_BASE_URL:+--health-base-url "${HEALTH_BASE_URL}"}
+
+  rollback:
+    name: Zero-Rebuild Rollback (${{ inputs.rollback_environment }})
+    needs: [validate-inputs]
+    if: inputs.mode == 'rollback'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.rollback_environment }}
+    concurrency:
+      group: cd-${{ inputs.rollback_environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm (when Convex deploy is enabled)
+        if: ${{ !inputs.skip_convex_deploy }}
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Install dependencies (when Convex deploy is enabled)
+        if: ${{ !inputs.skip_convex_deploy }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure AWS credentials via GitHub OIDC (target environment role)
+        uses: aws-actions/configure-aws-credentials@45666896f5d8e0f10ae255413f3a4cdd03bdc8f5 # v6.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify rollback digest exists in Amazon ECR
+        id: ecr
+        env:
+          IMAGE_DIGEST: ${{ needs.validate-inputs.outputs.image_digest }}
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          aws ecr describe-images \
+            --region "${AWS_REGION}" \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids "imageDigest=${IMAGE_DIGEST}" >/dev/null
+          echo "image_uri=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}@${IMAGE_DIGEST}" >> "${GITHUB_OUTPUT}"
+
+      - name: Optional Convex deploy during rollback
+        if: ${{ !inputs.skip_convex_deploy }}
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: npx convex deploy --yes
+
+      - name: Roll back App Runner service to previous digest and verify /healthz & /readyz
+        env:
+          APPRUNNER_SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
+          IMAGE_URI: ${{ steps.ecr.outputs.image_uri }}
+          HEALTH_BASE_URL: ${{ vars.APP_URL }}
+        run: |
+          node scripts/deploy-apprunner.mjs \
+            --service-arn "${APPRUNNER_SERVICE_ARN}" \
+            --image-uri "${IMAGE_URI}" \
+            --region "${AWS_REGION}" \
+            ${HEALTH_BASE_URL:+--health-base-url "${HEALTH_BASE_URL}"}
