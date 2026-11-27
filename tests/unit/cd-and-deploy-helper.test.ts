@@ -3,15 +3,16 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   assertDeployedImageDigest,
-  buildSafeUpdateSourceConfiguration,
+  buildSafeUpdatePrimaryContainer,
+  resolveExpressServiceUrl,
   validateDigestImageUri,
   verifyServiceHealth,
-} from "../../scripts/deploy-apprunner.mjs";
+} from "../../scripts/deploy-ecs-express.mjs";
 
 const VALID_DIGEST = "sha256:" + "a".repeat(64);
-const VALID_ECR_URI = `123456789012.dkr.ecr.us-east-1.amazonaws.com/lendloop-web@${VALID_DIGEST}`;
+const VALID_ECR_URI = `041459489381.dkr.ecr.ap-southeast-2.amazonaws.com/lendloop-web@${VALID_DIGEST}`;
 
-describe("App Runner read-modify-write deploy helper", () => {
+describe("ECS Express Mode read-modify-write deploy helper", () => {
   describe("validateDigestImageUri", () => {
     it("accepts a valid ECR digest-pinned image URI", () => {
       expect(() => validateDigestImageUri(VALID_ECR_URI)).not.toThrow();
@@ -19,105 +20,137 @@ describe("App Runner read-modify-write deploy helper", () => {
 
     it("rejects mutable tags and malformed digests", () => {
       expect(() =>
-        validateDigestImageUri("123456789012.dkr.ecr.us-east-1.amazonaws.com/lendloop-web:latest"),
-      ).toThrow(/digest/i);
-      expect(() =>
-        validateDigestImageUri("123456789012.dkr.ecr.us-east-1.amazonaws.com/lendloop-web:main"),
+        validateDigestImageUri(
+          "041459489381.dkr.ecr.ap-southeast-2.amazonaws.com/lendloop-web:latest",
+        ),
       ).toThrow(/digest/i);
       expect(() =>
         validateDigestImageUri(
-          "123456789012.dkr.ecr.us-east-1.amazonaws.com/lendloop-web@sha256:1234",
+          "041459489381.dkr.ecr.ap-southeast-2.amazonaws.com/lendloop-web:main",
+        ),
+      ).toThrow(/digest/i);
+      expect(() =>
+        validateDigestImageUri(
+          "041459489381.dkr.ecr.ap-southeast-2.amazonaws.com/lendloop-web@sha256:1234",
         ),
       ).toThrow(/digest/i);
       expect(() => validateDigestImageUri("")).toThrow(/digest/i);
     });
   });
 
-  describe("buildSafeUpdateSourceConfiguration", () => {
-    it("replaces only ImageIdentifier while preserving SSM secrets, env vars, port, and auth config", () => {
+  describe("buildSafeUpdatePrimaryContainer", () => {
+    it("replaces only image while preserving SSM secrets, env vars, port, and log config", () => {
       const existingService = {
-        ServiceArn: "arn:aws:apprunner:us-east-1:123456789012:service/lendloop-dev/abc",
-        ServiceUrl: "abc.us-east-1.awsapprunner.com",
-        Status: "RUNNING",
-        SourceConfiguration: {
-          AutoDeploymentsEnabled: true,
-          AuthenticationConfiguration: {
-            AccessRoleArn: "arn:aws:iam::123456789012:role/lendloop-apprunner-ecr-access",
-          },
-          ImageRepository: {
-            ImageIdentifier: `123456789012.dkr.ecr.us-east-1.amazonaws.com/lendloop-web@sha256:${"b".repeat(64)}`,
-            ImageRepositoryType: "ECR",
-            ImageConfiguration: {
-              Port: "3000",
-              RuntimeEnvironmentVariables: {
-                APP_ENV: "dev",
-                APP_URL: "https://dev.lendloop.example.com",
-                CONVEX_URL: "https://dev-example.convex.cloud",
+        serviceArn: "arn:aws:ecs:ap-southeast-2:041459489381:service/default/lendloop-dev",
+        serviceName: "lendloop-dev",
+        cluster: "default",
+        status: { statusCode: "ACTIVE" },
+        activeConfigurations: [
+          {
+            createdAt: 1_700_000_000,
+            ingressPaths: [{ accessType: "PUBLIC", endpoint: "lendloop-dev.ap-southeast-2.ecs.aws" }],
+            primaryContainer: {
+              image: `041459489381.dkr.ecr.ap-southeast-2.amazonaws.com/lendloop-web@sha256:${"b".repeat(64)}`,
+              containerPort: 3000,
+              awsLogsConfiguration: {
+                logGroup: "/aws/ecs/express/lendloop-dev",
+                logStreamPrefix: "web",
               },
-              RuntimeEnvironmentSecrets: {
-                CLERK_SECRET_KEY:
-                  "arn:aws:ssm:us-east-1:123456789012:parameter/lendloop/dev/CLERK_SECRET_KEY",
-                CLERK_PUBLISHABLE_KEY:
-                  "arn:aws:ssm:us-east-1:123456789012:parameter/lendloop/dev/CLERK_PUBLISHABLE_KEY",
-              },
+              environment: [
+                { name: "APP_ENV", value: "dev" },
+                { name: "APP_URL", value: "https://lendloop-dev.ap-southeast-2.ecs.aws" },
+                { name: "CONVEX_URL", value: "https://adventurous-bulldog-441.convex.cloud" },
+              ],
+              secrets: [
+                {
+                  name: "CLERK_SECRET_KEY",
+                  valueFrom:
+                    "arn:aws:ssm:ap-southeast-2:041459489381:parameter/lendloop/dev/CLERK_SECRET_KEY",
+                },
+                {
+                  name: "CLERK_PUBLISHABLE_KEY",
+                  valueFrom:
+                    "arn:aws:ssm:ap-southeast-2:041459489381:parameter/lendloop/dev/CLERK_PUBLISHABLE_KEY",
+                },
+              ],
             },
           },
-        },
+        ],
       };
 
       const snapshotBefore = structuredClone(existingService);
-      const updated = buildSafeUpdateSourceConfiguration(existingService, VALID_ECR_URI);
+      const updated = buildSafeUpdatePrimaryContainer(existingService, VALID_ECR_URI);
 
       // Must not mutate the input object
       expect(existingService).toEqual(snapshotBefore);
 
-      // Replaces only ImageIdentifier and disables auto-deployments (digest-promoted)
-      expect(updated.ImageRepository.ImageIdentifier).toBe(VALID_ECR_URI);
-      expect(updated.AutoDeploymentsEnabled).toBe(false);
+      // Replaces only image
+      expect(updated.image).toBe(VALID_ECR_URI);
 
       // Preserves all existing configuration intact
-      expect(updated.AuthenticationConfiguration).toEqual(
-        existingService.SourceConfiguration.AuthenticationConfiguration,
-      );
-      expect(updated.ImageRepository.ImageRepositoryType).toBe("ECR");
-      expect(updated.ImageRepository.ImageConfiguration).toEqual(
-        existingService.SourceConfiguration.ImageRepository.ImageConfiguration,
-      );
+      const originalContainer = existingService.activeConfigurations[0].primaryContainer;
+      expect(updated.containerPort).toBe(3000);
+      expect(updated.awsLogsConfiguration).toEqual(originalContainer.awsLogsConfiguration);
+      expect(updated.environment).toEqual(originalContainer.environment);
+      expect(updated.secrets).toEqual(originalContainer.secrets);
     });
 
-    it("throws when SourceConfiguration.ImageRepository is missing", () => {
+    it("throws when activeConfigurations or primaryContainer is missing", () => {
       expect(() =>
-        buildSafeUpdateSourceConfiguration({ SourceConfiguration: {} }, VALID_ECR_URI),
-      ).toThrow(/ImageRepository/i);
+        buildSafeUpdatePrimaryContainer({ activeConfigurations: [] }, VALID_ECR_URI),
+      ).toThrow(/activeConfigurations/i);
+      expect(() =>
+        buildSafeUpdatePrimaryContainer({ activeConfigurations: [{}] }, VALID_ECR_URI),
+      ).toThrow(/primaryContainer/i);
     });
   });
 
   describe("assertDeployedImageDigest", () => {
-    it("passes when the running service serves the exact expected digest", () => {
+    it("passes when the active service serves the exact expected digest", () => {
       expect(() =>
         assertDeployedImageDigest(
           {
-            SourceConfiguration: {
-              ImageRepository: { ImageIdentifier: VALID_ECR_URI, ImageRepositoryType: "ECR" },
-            },
+            activeConfigurations: [
+              {
+                createdAt: 1_700_000_000,
+                primaryContainer: { image: VALID_ECR_URI },
+              },
+            ],
           },
           VALID_ECR_URI,
         ),
       ).not.toThrow();
     });
 
-    it("throws when App Runner silently auto-rolled back to a previous digest", () => {
-      const previousUri = `123456789012.dkr.ecr.us-east-1.amazonaws.com/lendloop-web@sha256:${"b".repeat(64)}`;
+    it("throws when ECS silently auto-rolled back to a previous digest", () => {
+      const previousUri = `041459489381.dkr.ecr.ap-southeast-2.amazonaws.com/lendloop-web@sha256:${"b".repeat(64)}`;
       expect(() =>
         assertDeployedImageDigest(
           {
-            SourceConfiguration: {
-              ImageRepository: { ImageIdentifier: previousUri, ImageRepositoryType: "ECR" },
-            },
+            activeConfigurations: [
+              {
+                createdAt: 1_700_000_000,
+                primaryContainer: { image: previousUri },
+              },
+            ],
           },
           VALID_ECR_URI,
         ),
       ).toThrow(/auto-rolled back/i);
+    });
+  });
+
+  describe("resolveExpressServiceUrl", () => {
+    it("resolves https URL from ingressPaths endpoint", () => {
+      expect(
+        resolveExpressServiceUrl({
+          activeConfigurations: [
+            {
+              ingressPaths: [{ accessType: "PUBLIC", endpoint: "lendloop-dev.ecs.aws" }],
+            },
+          ],
+        }),
+      ).toBe("https://lendloop-dev.ecs.aws");
     });
   });
 
@@ -133,15 +166,15 @@ describe("App Runner read-modify-write deploy helper", () => {
       };
 
       await verifyServiceHealth({
-        baseUrl: "https://dev.example.awsapprunner.com/",
+        baseUrl: "https://dev.example.ecs.aws/",
         fetchImpl: mockFetch,
         maxAttempts: 3,
         delayMs: 0,
       });
 
       expect(calls).toEqual([
-        "https://dev.example.awsapprunner.com/healthz",
-        "https://dev.example.awsapprunner.com/readyz",
+        "https://dev.example.ecs.aws/healthz",
+        "https://dev.example.ecs.aws/readyz",
       ]);
     });
 
@@ -159,7 +192,7 @@ describe("App Runner read-modify-write deploy helper", () => {
       };
 
       await verifyServiceHealth({
-        baseUrl: "https://dev.example.awsapprunner.com",
+        baseUrl: "https://dev.example.ecs.aws",
         fetchImpl: mockFetch,
         maxAttempts: 3,
         delayMs: 0,
@@ -178,7 +211,7 @@ describe("App Runner read-modify-write deploy helper", () => {
 
       await expect(
         verifyServiceHealth({
-          baseUrl: "https://dev.example.awsapprunner.com",
+          baseUrl: "https://dev.example.ecs.aws",
           fetchImpl: mockFetch,
           maxAttempts: 2,
           delayMs: 0,
@@ -192,12 +225,13 @@ describe("AWS CD workflows & published-digest Compose contract", () => {
   const workflowFiles = ["cd.yml", "promote.yml"];
 
   for (const file of workflowFiles) {
-    it(`${file} pins every GitHub Action to a 40-char commit SHA and defaults permissions to contents: read`, () => {
+    it(`${file} pins every GitHub Action to a 40-char commit SHA, targets ap-southeast-2, and defaults permissions to contents: read`, () => {
       const fullPath = path.resolve(process.cwd(), ".github", "workflows", file);
       expect(fs.existsSync(fullPath)).toBe(true);
       const raw = fs.readFileSync(fullPath, "utf8");
 
       expect(raw).toMatch(/^permissions:\s*\r?\n\s+contents:\s*read\b/m);
+      expect(raw).toContain("AWS_REGION: ap-southeast-2");
 
       const usesMatches = [...raw.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)].map((m) => m[1]);
       expect(usesMatches.length).toBeGreaterThan(0);
@@ -216,7 +250,7 @@ describe("AWS CD workflows & published-digest Compose contract", () => {
     expect(raw).toContain("environment: staging");
     expect(raw).toContain("environment: prod");
     expect(raw).toContain("rollback");
-    expect(raw).toContain("scripts/deploy-apprunner.mjs");
+    expect(raw).toContain("scripts/deploy-ecs-express.mjs");
   });
 
   it("docker-compose.published.yml pulls an immutable digest image without building locally", () => {

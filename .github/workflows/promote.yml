@@ -44,7 +44,7 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: ap-southeast-2
   ECR_REPOSITORY: lendloop-web
 
 jobs:
@@ -117,14 +117,14 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
         run: npx convex deploy --yes
 
-      - name: Update qa App Runner service and verify /healthz & /readyz
+      - name: Update qa ECS Express service and verify /healthz & /readyz
         env:
-          APPRUNNER_SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
+          ECS_SERVICE_ARN: ${{ vars.ECS_SERVICE_ARN }}
           IMAGE_URI: ${{ steps.ecr.outputs.image_uri }}
           HEALTH_BASE_URL: ${{ vars.APP_URL }}
         run: |
-          node scripts/deploy-apprunner.mjs \
-            --service-arn "${APPRUNNER_SERVICE_ARN}" \
+          node scripts/deploy-ecs-express.mjs \
+            --service-arn "${ECS_SERVICE_ARN}" \
             --image-uri "${IMAGE_URI}" \
             --region "${AWS_REGION}" \
             ${HEALTH_BASE_URL:+--health-base-url "${HEALTH_BASE_URL}"}
@@ -180,14 +180,14 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
         run: npx convex deploy --yes
 
-      - name: Update staging App Runner service and verify /healthz & /readyz
+      - name: Update staging ECS Express service and verify /healthz & /readyz
         env:
-          APPRUNNER_SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
+          ECS_SERVICE_ARN: ${{ vars.ECS_SERVICE_ARN }}
           IMAGE_URI: ${{ steps.ecr.outputs.image_uri }}
           HEALTH_BASE_URL: ${{ vars.APP_URL }}
         run: |
-          node scripts/deploy-apprunner.mjs \
-            --service-arn "${APPRUNNER_SERVICE_ARN}" \
+          node scripts/deploy-ecs-express.mjs \
+            --service-arn "${ECS_SERVICE_ARN}" \
             --image-uri "${IMAGE_URI}" \
             --region "${AWS_REGION}" \
             ${HEALTH_BASE_URL:+--health-base-url "${HEALTH_BASE_URL}"}
@@ -243,14 +243,14 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
         run: npx convex deploy --yes
 
-      - name: Update prod App Runner service and verify /healthz & /readyz
+      - name: Update prod ECS Express service and verify /healthz & /readyz
         env:
-          APPRUNNER_SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
+          ECS_SERVICE_ARN: ${{ vars.ECS_SERVICE_ARN }}
           IMAGE_URI: ${{ steps.ecr.outputs.image_uri }}
           HEALTH_BASE_URL: ${{ vars.APP_URL }}
         run: |
-          node scripts/deploy-apprunner.mjs \
-            --service-arn "${APPRUNNER_SERVICE_ARN}" \
+          node scripts/deploy-ecs-express.mjs \
+            --service-arn "${ECS_SERVICE_ARN}" \
             --image-uri "${IMAGE_URI}" \
             --region "${AWS_REGION}" \
             ${HEALTH_BASE_URL:+--health-base-url "${HEALTH_BASE_URL}"}
@@ -308,14 +308,14 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
         run: npx convex deploy --yes
 
-      - name: Roll back App Runner service to previous digest and verify /healthz & /readyz
+      - name: Roll back ECS Express service to previous digest and verify /healthz & /readyz
         env:
-          APPRUNNER_SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
+          ECS_SERVICE_ARN: ${{ vars.ECS_SERVICE_ARN }}
           IMAGE_URI: ${{ steps.ecr.outputs.image_uri }}
           HEALTH_BASE_URL: ${{ vars.APP_URL }}
         run: |
-          node scripts/deploy-apprunner.mjs \
-            --service-arn "${APPRUNNER_SERVICE_ARN}" \
+          node scripts/deploy-ecs-express.mjs \
+            --service-arn "${ECS_SERVICE_ARN}" \
             --image-uri "${IMAGE_URI}" \
             --region "${AWS_REGION}" \
             ${HEALTH_BASE_URL:+--health-base-url "${HEALTH_BASE_URL}"}

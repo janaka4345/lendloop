@@ -24,7 +24,7 @@ LendLoop is structured as a **domain-sliced modular monolith** across five verti
 - [GLOSSARY.md](GLOSSARY.md) — Canonical ubiquitous language (`User`, `Lender`, `Borrower`, `Admin`, `Trusted Lender`, `Listing`, `Loan`, `Category`, `Condition`, `Availability`, `Overdue`, `Automation Activity`, `Audit Log`).
 - [CODING_STANDARDS.md](CODING_STANDARDS.md) — Judgement-call engineering and security standards.
 - [docs/n8n-workflows.md](docs/n8n-workflows.md) — n8n workflow architecture, credential setup, rotation, and troubleshooting.
-- [docs/aws-setup-runbook.md](docs/aws-setup-runbook.md) — 4-part AWS Console setup and operations runbook (`us-east-1` ECR, OIDC, App Runner, SSM secrets, CloudWatch, Budgets, and zero-rebuild rollback).
+- [docs/aws-setup-runbook.md](docs/aws-setup-runbook.md) — 4-part AWS setup and operations runbook (`ap-southeast-2` ECR, OIDC, Amazon ECS Express Mode, SSM secrets, CloudWatch, Budgets, and zero-rebuild rollback).
 - Architecture Decision Records:
   - [ADR-0001: Modular Monolith & Convex Seams](docs/adr/0001-modular-monolith-and-convex-seams.md)
   - [ADR-0002: Convex-Authoritative RBAC & Dual-Path Clerk Sync](docs/adr/0002-convex-authoritative-rbac-and-dual-path-clerk-sync.md)
